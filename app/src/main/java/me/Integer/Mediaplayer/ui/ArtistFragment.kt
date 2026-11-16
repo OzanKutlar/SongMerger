@@ -35,6 +35,7 @@ class ArtistFragment : Fragment(R.layout.fragment_artist), LibraryRepository.Lis
             thumbnails = ThumbnailLoader.get(requireContext()),
             artistLine = { track -> repository.displayArtist(track).ifEmpty { getString(R.string.library_unknown_artist) } },
             onClick = { index -> host.playTracks(tracks, index) },
+            onPlayNext = { track -> TrackMenu.playNext(requireContext(), track, host, repository) },
             onMenu = { track, anchor -> TrackMenu.show(anchor, track, host, repository) }
         )
         val list = view.findViewById<RecyclerView>(R.id.artistList)

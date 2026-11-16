@@ -9,7 +9,7 @@ import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
- * The app's music library: cached tracks, scanning and the artist view of the songs.
+ * The app's music library: cached tracks, scanning, favorites, and the artist/album views.
  * One instance per process, shared by the screens and the playback service.
  *
  * All public members are main thread only. Loading and scanning run on one worker thread
@@ -18,7 +18,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 class LibraryRepository private constructor(appContext: Context) {
 
     interface Listener {
-        /** Tracks, the separator or a manual artist split changed. */
+        /** Tracks, favorites, the separator or a manual artist split changed. */
         fun onLibraryChanged()
 
         fun onScanState(state: ScanState)
@@ -30,6 +30,7 @@ class LibraryRepository private constructor(appContext: Context) {
     val settings = PlayerSettings(appContext)
     val folders = MusicFolderStore(appContext)
     val overrides = ArtistOverrides(appContext)
+    val favorites = FavoritesStore(appContext)
 
     private val index = LibraryIndex(appContext)
     private val scanner = LibraryScanner(appContext, TagReader(appContext))
@@ -96,6 +97,33 @@ class LibraryRepository private constructor(appContext: Context) {
         }
     }
 
+    // ------------------------------------------------------------------ queries & favorites
+
+    fun findTrack(trackUri: String): Track? {
+        if (trackUri.isEmpty()) return null
+        return tracks.firstOrNull { it.uri == trackUri }
+    }
+
+    fun isFavorite(trackUri: String): Boolean {
+        return favorites.isFavorite(trackUri)
+    }
+
+    fun toggleFavorite(trackUri: String): Boolean {
+        val state = favorites.toggle(trackUri)
+        notifyArtistRulesChanged()
+        return state
+    }
+
+    fun favoriteTracks(): List<Track> {
+        val favUris = favorites.all()
+        if (favUris.isEmpty()) return emptyList()
+        return tracks.filter { it.uri in favUris }
+    }
+
+    fun tracksInAlbum(album: String): List<Track> {
+        return tracks.filter { it.album.equals(album, ignoreCase = true) }
+    }
+
     // ------------------------------------------------------------------ artists
 
     /** The individual artists of a song: the manual split if there is one, else automatic. */
@@ -113,7 +141,7 @@ class LibraryRepository private constructor(appContext: Context) {
         return ArtistGrouper.group(tracks) { artistsOf(it) }
     }
 
-    /** Call after changing the separator or a manual split, so the screens regroup. */
+    /** Call after changing the separator, favorites or a manual split, so the screens update. */
     fun notifyArtistRulesChanged() {
         for (listener in ArrayList(listeners)) listener.onLibraryChanged()
     }

@@ -17,12 +17,14 @@ import me.Integer.Mediaplayer.library.Track
 import me.Integer.Mediaplayer.playback.NowPlaying
 import me.Integer.Mediaplayer.playback.NowPlayingListener
 import me.Integer.Mediaplayer.playback.PlayerConnection
+import me.Integer.Mediaplayer.ui.AlbumFragment
 import me.Integer.Mediaplayer.ui.ArtistFragment
 import me.Integer.Mediaplayer.ui.LibraryFragment
 import me.Integer.Mediaplayer.ui.MiniPlayerBar
 import me.Integer.Mediaplayer.ui.Navigator
 import me.Integer.Mediaplayer.ui.NowPlayingFragment
 import me.Integer.Mediaplayer.ui.PlayerHost
+import me.Integer.Mediaplayer.ui.QueueFragment
 import me.Integer.Mediaplayer.ui.SettingsFragment
 import kotlin.math.roundToInt
 import kotlin.random.Random
@@ -56,7 +58,8 @@ class MainActivity : AppCompatActivity(), PlayerHost, Navigator, NowPlayingListe
     private val screenWatcher = object : FragmentManager.FragmentLifecycleCallbacks() {
         override fun onFragmentResumed(fm: FragmentManager, f: Fragment) {
             if (f.id != R.id.mainContainer) return
-            miniBar.setSuppressed(f is NowPlayingFragment || f is SettingsFragment)
+            val hide = f is NowPlayingFragment || f is SettingsFragment || f is QueueFragment
+            miniBar.setSuppressed(hide)
         }
     }
 
@@ -131,7 +134,7 @@ class MainActivity : AppCompatActivity(), PlayerHost, Navigator, NowPlayingListe
     }
 
     private fun onArtLoaded(trackUri: String, art: Bitmap?) {
-        if (trackUri != nowPlaying.trackUri) return // an older request finished late
+        if (trackUri != nowPlaying.trackUri) return
         val firstAnswer = !isArtResolved
         currentArt = art
         isArtResolved = true
@@ -160,6 +163,15 @@ class MainActivity : AppCompatActivity(), PlayerHost, Navigator, NowPlayingListe
 
     override fun openArtist(name: String) {
         open(ArtistFragment.create(name))
+    }
+
+    override fun openAlbum(albumName: String) {
+        open(AlbumFragment.create(albumName))
+    }
+
+    override fun openQueue() {
+        if (supportFragmentManager.findFragmentById(R.id.mainContainer) is QueueFragment) return
+        open(QueueFragment())
     }
 
     override fun openSettings() {

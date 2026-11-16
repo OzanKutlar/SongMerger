@@ -10,12 +10,17 @@ import androidx.core.content.ContextCompat
 import androidx.recyclerview.widget.RecyclerView
 import me.Integer.Mediaplayer.R
 import me.Integer.Mediaplayer.library.Track
+import me.Integer.Mediaplayer.ui.widgets.PressFeedback
 
-/** Song rows: cover, title, artists and a three-dot menu. The playing song is highlighted. */
+/**
+ * Song rows: cover, title, artists, a quick "Play next" button, and a three-dot menu.
+ * The playing song is highlighted.
+ */
 class TrackAdapter(
     private val thumbnails: ThumbnailLoader,
     private val artistLine: (Track) -> String,
     private val onClick: (Int) -> Unit,
+    private val onPlayNext: (Track) -> Unit,
     private val onMenu: (Track, View) -> Unit
 ) : RecyclerView.Adapter<TrackAdapter.Holder>() {
 
@@ -24,6 +29,7 @@ class TrackAdapter(
         val art: ImageView = view.findViewById(R.id.trackArt)
         val title: TextView = view.findViewById(R.id.trackTitle)
         val artist: TextView = view.findViewById(R.id.trackArtist)
+        val playNext: View = view.findViewById(R.id.trackPlayNext)
         val menu: View = view.findViewById(R.id.trackMenu)
         val divider: View = view.findViewById(R.id.trackDivider)
     }
@@ -52,9 +58,14 @@ class TrackAdapter(
         val view = LayoutInflater.from(parent.context).inflate(R.layout.item_track, parent, false)
         val holder = Holder(view)
         holder.thumb.clipToOutline = true
+        PressFeedback.attach(holder.playNext)
         view.setOnClickListener {
             val position = holder.bindingAdapterPosition
             if (position != RecyclerView.NO_POSITION) onClick(position)
+        }
+        holder.playNext.setOnClickListener {
+            val position = holder.bindingAdapterPosition
+            if (position in tracks.indices) onPlayNext(tracks[position])
         }
         holder.menu.setOnClickListener { anchor ->
             val position = holder.bindingAdapterPosition

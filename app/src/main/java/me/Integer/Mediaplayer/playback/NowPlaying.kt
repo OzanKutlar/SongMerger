@@ -9,6 +9,7 @@ data class NowPlaying(
     val trackUri: String = "",
     val title: String = "",
     val artist: String = "",
+    val album: String = "",
     val durationMs: Long = 0L,
     val positionMs: Long = 0L,
     val positionUpdatedAtMs: Long = 0L,
@@ -21,7 +22,9 @@ data class NowPlaying(
     val canNext: Boolean = false,
     val canSeek: Boolean = false,
     val shuffleOn: Boolean = false,
-    val repeatMode: Int = REPEAT_OFF
+    val repeatMode: Int = REPEAT_OFF,
+    val currentIndex: Int = -1,
+    val queue: List<QueueItem> = emptyList()
 ) {
 
     /** Live position, extrapolated from the last report. */

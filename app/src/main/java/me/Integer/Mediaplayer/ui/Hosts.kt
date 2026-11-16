@@ -39,6 +39,10 @@ interface Navigator {
 
     fun openArtist(name: String)
 
+    fun openAlbum(albumName: String)
+
+    fun openQueue()
+
     fun openSettings()
 
     fun goBack()

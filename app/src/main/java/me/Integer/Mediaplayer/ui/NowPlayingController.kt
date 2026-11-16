@@ -15,6 +15,7 @@ import android.widget.SeekBar
 import android.widget.TextView
 import androidx.core.content.ContextCompat
 import me.Integer.Mediaplayer.R
+import me.Integer.Mediaplayer.library.LibraryRepository
 import me.Integer.Mediaplayer.playback.NowPlaying
 import me.Integer.Mediaplayer.playback.PlaybackClock
 import me.Integer.Mediaplayer.playback.SkipOutcome
@@ -35,7 +36,11 @@ import kotlin.math.abs
  * and hold-and-turn scrubbing on the disc. Every animation is settled in [stop], so
  * nothing runs in the background. Main thread only.
  */
-class NowPlayingController(root: View, private val host: PlayerHost) {
+class NowPlayingController(
+    root: View,
+    private val host: PlayerHost,
+    private val repository: LibraryRepository
+) {
 
     private val context = root.context
     private val density = context.resources.displayMetrics.density
@@ -56,6 +61,12 @@ class NowPlayingController(root: View, private val host: PlayerHost) {
     private val elapsedView: TextView = root.findViewById(R.id.playerElapsed)
     private val durationView: TextView = root.findViewById(R.id.playerDuration)
     private val seekBar: SeekBar = root.findViewById(R.id.playerSeek)
+    private val favoriteCell: View = root.findViewById(R.id.playerFavorite)
+    private val favoriteIcon: ImageView = root.findViewById(R.id.playerFavoriteIcon)
+    private val queueCell: View = root.findViewById(R.id.playerQueue)
+    private val queueIcon: View = root.findViewById(R.id.playerQueueIcon)
+    private val moreCell: View = root.findViewById(R.id.playerMore)
+    private val moreIcon: View = root.findViewById(R.id.playerMoreIcon)
     private val shuffleCell: View = root.findViewById(R.id.playerShuffle)
     private val shuffleIcon: ImageView = root.findViewById(R.id.playerShuffleIcon)
     private val previousCell: View = root.findViewById(R.id.playerPrevious)
@@ -85,6 +96,7 @@ class NowPlayingController(root: View, private val host: PlayerHost) {
     private var lastSkipDirection = TrackTransition.DIRECTION_NEXT
     private var lastSkipAt = 0L
     private var shownRepeatMode = NO_MODE
+    private var shownFavorite: Boolean? = null
 
     // Carousel: the track the record on screen belongs to, and a record waiting to enter.
     private var discKey: String? = null
@@ -188,6 +200,9 @@ class NowPlayingController(root: View, private val host: PlayerHost) {
     // ------------------------------------------------------------------ setup
 
     private fun wireControls() {
+        PressFeedback.attach(favoriteCell, favoriteIcon)
+        PressFeedback.attach(queueCell, queueIcon)
+        PressFeedback.attach(moreCell, moreIcon)
         PressFeedback.attach(shuffleCell, shuffleIcon)
         PressFeedback.attach(previousCell, previousIcon)
         PressFeedback.attach(playCell, playButton)
@@ -200,6 +215,7 @@ class NowPlayingController(root: View, private val host: PlayerHost) {
             override fun onScrub(deltaDegrees: Float) = scrubBy(deltaDegrees)
             override fun onScrubEnd(commit: Boolean) = endScrub(commit)
         })
+        favoriteCell.setOnClickListener { onFavoriteTapped() }
         playCell.setOnClickListener { onPlayPauseTapped() }
         vinyl.setOnClickListener { onPlayPauseTapped() }
         previousCell.setOnClickListener { onSkip(TrackTransition.DIRECTION_PREVIOUS, false) }
@@ -211,6 +227,13 @@ class NowPlayingController(root: View, private val host: PlayerHost) {
     }
 
     // ------------------------------------------------------------------ taps
+
+    private fun onFavoriteTapped() {
+        val current = state
+        if (!current.active || current.trackUri.isEmpty()) return
+        repository.toggleFavorite(current.trackUri)
+        hop(favoriteIcon)
+    }
 
     /** Optimistic: the icon, pulse and disc react at once; the player confirms later. */
     private fun onPlayPauseTapped() {
@@ -476,6 +499,9 @@ class NowPlayingController(root: View, private val host: PlayerHost) {
         vinyl.setPlaying(false)
         vinyl.setArt(null)
         ambience.setArt(null)
+        setUsable(favoriteCell, false)
+        setUsable(queueCell, false)
+        setUsable(moreCell, false)
         setUsable(previousCell, false)
         setUsable(nextCell, false)
         setUsable(playCell, false)
@@ -497,7 +523,7 @@ class NowPlayingController(root: View, private val host: PlayerHost) {
             if (!transition.isFadingOut) applyTrackText(current)
             return
         }
-        if (transition.isFadingOut) return // the swap will pick up this newest state
+        if (transition.isFadingOut) return
         transition.run(recentSkipDirection(now), applyLatestTrack)
         glideProgress(PlaybackClock.toPermille(current.positionAt(now), current.durationMs))
     }
@@ -505,7 +531,9 @@ class NowPlayingController(root: View, private val host: PlayerHost) {
     private fun applyTrackText(current: NowPlaying) {
         displayedUri = current.trackUri
         titleView.setText(current.title.ifEmpty { unknownTitle })
-        val artist = current.artist.ifEmpty { unknownArtist }
+        val artist = repository.findTrack(current.trackUri)?.let { repository.displayArtist(it) }
+            ?.ifEmpty { null }
+            ?: current.artist.ifEmpty { unknownArtist }
         if (artistView.text.toString() != artist) artistView.text = artist
     }
 
@@ -539,12 +567,24 @@ class NowPlayingController(root: View, private val host: PlayerHost) {
     }
 
     private fun renderButtons(current: NowPlaying) {
+        setUsable(favoriteCell, true)
+        setUsable(queueCell, true)
+        setUsable(moreCell, true)
         setUsable(previousCell, true)
         setUsable(nextCell, current.canNext)
         setUsable(playCell, true)
         setUsable(seekBar, current.canSeek)
+        renderFavorite(current)
         renderShuffle(current)
         renderRepeat(current)
+    }
+
+    private fun renderFavorite(current: NowPlaying) {
+        val fav = repository.isFavorite(current.trackUri)
+        if (shownFavorite == fav) return
+        shownFavorite = fav
+        favoriteIcon.setImageResource(if (fav) R.drawable.player_ic_heart else R.drawable.player_ic_heart_outline)
+        favoriteIcon.setColorFilter(if (fav) COLOR_ON else COLOR_IDLE)
     }
 
     /** Optimistic state wins until the player confirms it or the window runs out. */
@@ -692,11 +732,11 @@ class NowPlayingController(root: View, private val host: PlayerHost) {
         if (playIconInitialised) resetPlayIcon()
         playPulse.animate().cancel()
         playPulse.alpha = 0f
-        for (control in listOf(shuffleCell, previousCell, playCell, nextCell, repeatCell, seekBar)) {
+        for (control in listOf(favoriteCell, queueCell, moreCell, shuffleCell, previousCell, playCell, nextCell, repeatCell, seekBar)) {
             settleTransform(control)
             control.alpha = if (control.isEnabled) 1f else DISABLED_ALPHA
         }
-        for (icon in listOf(shuffleIcon, previousIcon, nextIcon, repeatIcon, playButton, vinyl)) {
+        for (icon in listOf(favoriteIcon, queueIcon, moreIcon, shuffleIcon, previousIcon, nextIcon, repeatIcon, playButton, vinyl)) {
             settleTransform(icon)
         }
         if (enterPendingSince != 0L && host.isArtResolved) vinyl.setArt(host.currentArt)

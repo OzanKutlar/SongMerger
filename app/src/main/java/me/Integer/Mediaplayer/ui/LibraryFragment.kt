@@ -15,6 +15,7 @@ import androidx.fragment.app.Fragment
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import me.Integer.Mediaplayer.R
+import me.Integer.Mediaplayer.library.ArtistSorter
 import me.Integer.Mediaplayer.library.LibraryRepository
 import me.Integer.Mediaplayer.library.Track
 import me.Integer.Mediaplayer.library.TrackSorter
@@ -22,7 +23,10 @@ import me.Integer.Mediaplayer.ui.widgets.PressFeedback
 import java.util.Locale
 import kotlin.math.abs
 
-/** The song picker: header with search and menu, Tracks and Artists tabs, and the list card. */
+/**
+ * The song picker: header with search and menu, Tracks / Favorites / Artists tabs,
+ * sort options (including sorting artists by song count), and the list card.
+ */
 class LibraryFragment : Fragment(R.layout.fragment_library), LibraryRepository.Listener, PlayerHost.Listener {
 
     private lateinit var repository: LibraryRepository
@@ -34,6 +38,7 @@ class LibraryFragment : Fragment(R.layout.fragment_library), LibraryRepository.L
     private lateinit var emptyView: TextView
     private lateinit var scanView: TextView
     private lateinit var songsTab: TextView
+    private lateinit var favoritesTab: TextView
     private lateinit var artistsTab: TextView
     private lateinit var searchBar: View
     private lateinit var searchInput: EditText
@@ -44,7 +49,7 @@ class LibraryFragment : Fragment(R.layout.fragment_library), LibraryRepository.L
     private lateinit var playAllButton: View
     private val tabAnimators = HashMap<TextView, ValueAnimator>()
 
-    private var showingArtists = false
+    private var activeTab = TAB_SONGS
     private var query = ""
     private var tabsStyled = false
     private var visibleTracks: List<Track> = emptyList()
@@ -54,7 +59,7 @@ class LibraryFragment : Fragment(R.layout.fragment_library), LibraryRepository.L
         repository = LibraryRepository.get(requireContext())
         host = requireActivity() as PlayerHost
         navigator = requireActivity() as Navigator
-        showingArtists = savedInstanceState?.getBoolean(KEY_ARTISTS) ?: showingArtists
+        activeTab = savedInstanceState?.getInt(KEY_TAB, TAB_SONGS) ?: activeTab
         tabsStyled = false
         bindViews(view)
         createAdapters()
@@ -64,7 +69,7 @@ class LibraryFragment : Fragment(R.layout.fragment_library), LibraryRepository.L
 
     override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)
-        outState.putBoolean(KEY_ARTISTS, showingArtists)
+        outState.putInt(KEY_TAB, activeTab)
     }
 
     override fun onStart() {
@@ -103,6 +108,7 @@ class LibraryFragment : Fragment(R.layout.fragment_library), LibraryRepository.L
         emptyView = view.findViewById(R.id.libraryEmpty)
         scanView = view.findViewById(R.id.libraryScan)
         songsTab = view.findViewById(R.id.libraryTabSongs)
+        favoritesTab = view.findViewById(R.id.libraryTabFavorites)
         artistsTab = view.findViewById(R.id.libraryTabArtists)
         searchBar = view.findViewById(R.id.librarySearchBar)
         searchInput = view.findViewById(R.id.librarySearch)
@@ -120,6 +126,7 @@ class LibraryFragment : Fragment(R.layout.fragment_library), LibraryRepository.L
             thumbnails = thumbnails,
             artistLine = { artistLineOf(it) },
             onClick = { index -> host.playTracks(visibleTracks, index) },
+            onPlayNext = { track -> TrackMenu.playNext(requireContext(), track, host, repository) },
             onMenu = { track, anchor -> TrackMenu.show(anchor, track, host, repository) }
         )
         artistAdapter = ArtistAdapter(thumbnails) { artist -> navigator.openArtist(artist.name) }
@@ -133,8 +140,9 @@ class LibraryFragment : Fragment(R.layout.fragment_library), LibraryRepository.L
             query = text?.toString().orEmpty()
             refresh()
         }
-        songsTab.setOnClickListener { selectTab(false) }
-        artistsTab.setOnClickListener { selectTab(true) }
+        songsTab.setOnClickListener { selectTab(TAB_SONGS) }
+        favoritesTab.setOnClickListener { selectTab(TAB_FAVORITES) }
+        artistsTab.setOnClickListener { selectTab(TAB_ARTISTS) }
     }
 
     private fun wireCard() {
@@ -166,10 +174,12 @@ class LibraryFragment : Fragment(R.layout.fragment_library), LibraryRepository.L
 
     private fun showOverflow(anchor: View) {
         val popup = PopupMenu(requireContext(), anchor)
-        popup.menu.add(0, ID_RESCAN, 0, R.string.library_rescan)
-        popup.menu.add(0, ID_SETTINGS, 1, R.string.library_settings)
+        popup.menu.add(0, ID_QUEUE, 0, R.string.menu_current_queue)
+        popup.menu.add(0, ID_RESCAN, 1, R.string.library_rescan)
+        popup.menu.add(0, ID_SETTINGS, 2, R.string.library_settings)
         popup.setOnMenuItemClickListener { item ->
             when (item.itemId) {
+                ID_QUEUE -> navigator.openQueue()
                 ID_RESCAN -> repository.rescan()
                 ID_SETTINGS -> navigator.openSettings()
             }
@@ -179,9 +189,17 @@ class LibraryFragment : Fragment(R.layout.fragment_library), LibraryRepository.L
     }
 
     private fun showSortMenu(anchor: View) {
+        if (activeTab == TAB_ARTISTS) {
+            showArtistSortMenu(anchor)
+        } else {
+            showTrackSortMenu(anchor)
+        }
+    }
+
+    private fun showTrackSortMenu(anchor: View) {
         val current = repository.settings.trackSort
         val popup = PopupMenu(requireContext(), anchor)
-        for ((mode, label) in SORT_LABELS.withIndex()) {
+        for ((mode, label) in TRACK_SORT_LABELS.withIndex()) {
             popup.menu.add(0, mode, mode, label).isChecked = mode == current
         }
         popup.menu.setGroupCheckable(0, true, true)
@@ -194,9 +212,25 @@ class LibraryFragment : Fragment(R.layout.fragment_library), LibraryRepository.L
         popup.show()
     }
 
-    private fun selectTab(artists: Boolean) {
-        if (showingArtists == artists) return
-        showingArtists = artists
+    private fun showArtistSortMenu(anchor: View) {
+        val current = repository.settings.artistSort
+        val popup = PopupMenu(requireContext(), anchor)
+        for ((mode, label) in ARTIST_SORT_LABELS.withIndex()) {
+            popup.menu.add(0, mode, mode, label).isChecked = mode == current
+        }
+        popup.menu.setGroupCheckable(0, true, true)
+        popup.setOnMenuItemClickListener { item ->
+            repository.settings.artistSort = item.itemId
+            refresh()
+            list.scrollToPosition(0)
+            true
+        }
+        popup.show()
+    }
+
+    private fun selectTab(tab: Int) {
+        if (activeTab == tab) return
+        activeTab = tab
         refresh()
         list.scrollToPosition(0)
     }
@@ -205,16 +239,20 @@ class LibraryFragment : Fragment(R.layout.fragment_library), LibraryRepository.L
 
     private fun refresh() {
         val needle = query.trim().lowercase(Locale.ROOT)
-        val shown = if (showingArtists) showArtists(needle) else showSongs(needle)
+        val shown = when (activeTab) {
+            TAB_FAVORITES -> showSongs(repository.favoriteTracks(), needle)
+            TAB_ARTISTS -> showArtists(needle)
+            else -> showSongs(repository.tracks, needle)
+        }
         renderTabs()
-        renderCardHeader(shown)
+        renderCardHeader()
         renderEmpty(shown)
         renderScan(repository.scanState)
     }
 
     /** @return the number of rows shown */
-    private fun showSongs(needle: String): Int {
-        val matching = repository.tracks.filter { track ->
+    private fun showSongs(source: List<Track>, needle: String): Int {
+        val matching = source.filter { track ->
             needle.isEmpty() ||
                 track.title.lowercase(Locale.ROOT).contains(needle) ||
                 track.artistTag.lowercase(Locale.ROOT).contains(needle)
@@ -226,17 +264,19 @@ class LibraryFragment : Fragment(R.layout.fragment_library), LibraryRepository.L
     }
 
     private fun showArtists(needle: String): Int {
-        val artists = repository.artists().filter { artist ->
+        val matching = repository.artists().filter { artist ->
             needle.isEmpty() || artist.name.lowercase(Locale.ROOT).contains(needle)
         }
-        artistAdapter.submit(artists)
+        val sorted = ArtistSorter.sort(matching, repository.settings.artistSort)
+        artistAdapter.submit(sorted)
         if (list.adapter !== artistAdapter) list.adapter = artistAdapter
-        return artists.size
+        return sorted.size
     }
 
     private fun renderTabs() {
-        styleTab(songsTab, !showingArtists)
-        styleTab(artistsTab, showingArtists)
+        styleTab(songsTab, activeTab == TAB_SONGS)
+        styleTab(favoritesTab, activeTab == TAB_FAVORITES)
+        styleTab(artistsTab, activeTab == TAB_ARTISTS)
         tabsStyled = true
     }
 
@@ -262,17 +302,17 @@ class LibraryFragment : Fragment(R.layout.fragment_library), LibraryRepository.L
         grow.start()
     }
 
-    private fun renderCardHeader(shownRows: Int) {
-        val tracksTab = !showingArtists
-        val buttons = if (tracksTab) View.VISIBLE else View.GONE
-        sortIcon.visibility = buttons
+    private fun renderCardHeader() {
+        val showingSongs = activeTab != TAB_ARTISTS
+        val buttons = if (showingSongs) View.VISIBLE else View.GONE
         shuffleButton.visibility = buttons
         playAllButton.visibility = buttons
-        sortButton.isClickable = tracksTab
-        sortLabel.text = if (tracksTab) {
-            getString(SORT_LABELS[repository.settings.trackSort])
+        sortIcon.visibility = View.VISIBLE
+        sortButton.isClickable = true
+        sortLabel.text = if (showingSongs) {
+            getString(TRACK_SORT_LABELS[repository.settings.trackSort])
         } else {
-            resources.getQuantityString(R.plurals.library_artist_count, shownRows, shownRows)
+            getString(ARTIST_SORT_LABELS[repository.settings.artistSort])
         }
         val usable = visibleTracks.isNotEmpty()
         shuffleButton.isEnabled = usable
@@ -284,7 +324,13 @@ class LibraryFragment : Fragment(R.layout.fragment_library), LibraryRepository.L
     private fun renderEmpty(shownRows: Int) {
         emptyView.visibility = if (shownRows == 0) View.VISIBLE else View.GONE
         if (shownRows > 0) return
-        emptyView.setText(if (repository.tracks.isEmpty()) R.string.library_empty else R.string.library_no_match)
+        val message = when {
+            repository.tracks.isEmpty() -> R.string.library_empty
+            query.isNotBlank() -> R.string.library_no_match
+            activeTab == TAB_FAVORITES -> R.string.library_favorites_empty
+            else -> R.string.library_no_match
+        }
+        emptyView.setText(message)
     }
 
     private fun renderScan(state: LibraryRepository.ScanState) {
@@ -302,16 +348,24 @@ class LibraryFragment : Fragment(R.layout.fragment_library), LibraryRepository.L
     }
 
     private companion object {
-        const val KEY_ARTISTS = "showing_artists"
-        const val ID_RESCAN = 1
-        const val ID_SETTINGS = 2
-        const val TAB_SELECTED_SP = 30f
+        const val KEY_TAB = "active_tab"
+        const val TAB_SONGS = 0
+        const val TAB_FAVORITES = 1
+        const val TAB_ARTISTS = 2
+
+        const val ID_QUEUE = 1
+        const val ID_RESCAN = 2
+        const val ID_SETTINGS = 3
+        const val TAB_SELECTED_SP = 28f
         const val TAB_IDLE_SP = 17f
         const val TAB_ANIMATION_MS = 220L
         const val ROUND_PRESS_SCALE = 0.9f
         const val DISABLED_ALPHA = 0.35f
 
         /** Indexed by the TrackSorter modes. */
-        val SORT_LABELS = intArrayOf(R.string.sort_title, R.string.sort_artist, R.string.sort_recent)
+        val TRACK_SORT_LABELS = intArrayOf(R.string.sort_title, R.string.sort_artist, R.string.sort_recent)
+
+        /** Indexed by the ArtistSorter modes. */
+        val ARTIST_SORT_LABELS = intArrayOf(R.string.sort_artist_name, R.string.sort_artist_count)
     }
 }
