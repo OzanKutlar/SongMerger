@@ -157,7 +157,7 @@
                     android:contentDescription="@null"
                     android:padding="17dp"
                     android:src="@drawable/player_ic_play"
-                    android:tint="#0B0F19" />
+                    android:tint="#000000" />
             </FrameLayout>
         </FrameLayout>
 

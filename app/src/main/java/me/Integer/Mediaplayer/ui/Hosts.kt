@@ -26,8 +26,11 @@ interface PlayerHost {
 
     fun removePlayerListener(listener: Listener)
 
-    /** Replaces the queue with [tracks] and starts at [startIndex]. */
+    /** Replaces the queue with [tracks] and starts at [startIndex], keeping the shuffle mode. */
     fun playTracks(tracks: List<Track>, startIndex: Int)
+
+    /** Plays all [tracks]: in order from the first, or shuffled from a random one. */
+    fun playAll(tracks: List<Track>, shuffle: Boolean)
 }
 
 /** Screen changes, handled by the activity. */

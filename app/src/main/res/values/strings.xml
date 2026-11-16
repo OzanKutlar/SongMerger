@@ -2,13 +2,23 @@
     <string name="app_name">Mediaplayer</string>
 
     <!-- Library -->
+    <string name="library_search">Search</string>
     <string name="library_search_hint">Search songs and artists</string>
+    <string name="library_search_close">Close search</string>
+    <string name="library_more">More options</string>
     <string name="library_settings">Settings</string>
-    <string name="library_tab_songs">SONGS</string>
-    <string name="library_tab_artists">ARTISTS</string>
+    <string name="library_rescan">Rescan library</string>
+    <string name="library_tab_songs">Tracks</string>
+    <string name="library_tab_artists">Artists</string>
+    <string name="library_sort">Sort order</string>
+    <string name="library_shuffle_all">Shuffle all</string>
+    <string name="library_play_all">Play all</string>
+    <string name="sort_title">Title</string>
+    <string name="sort_artist">Artist</string>
+    <string name="sort_recent">Recently added</string>
     <string name="library_scanning">Scanning %1$d / %2$d</string>
     <string name="library_scanning_folders">Looking for songs</string>
-    <string name="library_empty">No songs yet. Open Settings and add the folder that holds your music.</string>
+    <string name="library_empty">No songs yet. Open &#8942; &#8594; Settings and add the folder that holds your music.</string>
     <string name="library_no_match">Nothing matches your search</string>
     <string name="library_folder_failed">Could not keep access to that folder</string>
     <string name="library_unknown_artist">Unknown artist</string>
@@ -16,6 +26,11 @@
         <item quantity="one">%1$d song</item>
         <item quantity="other">%1$d songs</item>
     </plurals>
+    <plurals name="library_artist_count">
+        <item quantity="one">%1$d artist</item>
+        <item quantity="other">%1$d artists</item>
+    </plurals>
+    <string name="artist_songs_label">Songs</string>
 
     <!-- Song menu -->
     <string name="menu_more">More options</string>

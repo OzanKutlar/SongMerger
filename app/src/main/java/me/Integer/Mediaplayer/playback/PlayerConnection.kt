@@ -164,6 +164,10 @@ class PlayerConnection(context: Context, private val listener: NowPlayingListene
         player.shuffleModeEnabled = !player.shuffleModeEnabled
     }
 
+    fun setShuffle(enabled: Boolean) {
+        controller?.shuffleModeEnabled = enabled
+    }
+
     /** Off, repeat all, repeat one, and back to off. */
     fun cycleRepeat() {
         val player = controller ?: return

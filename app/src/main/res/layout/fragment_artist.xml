@@ -5,55 +5,118 @@
     android:background="@color/background"
     android:orientation="vertical">
 
+    <FrameLayout
+        android:id="@+id/artistBack"
+        android:layout_width="56dp"
+        android:layout_height="56dp"
+        android:layout_marginStart="4dp"
+        android:layout_marginTop="4dp"
+        android:background="@drawable/player_cell_bg"
+        android:clickable="true"
+        android:contentDescription="@string/settings_back"
+        android:focusable="true">
+
+        <ImageView
+            android:layout_width="24dp"
+            android:layout_height="24dp"
+            android:layout_gravity="center"
+            android:contentDescription="@null"
+            android:src="@drawable/player_ic_back"
+            android:tint="#F5F5F7" />
+    </FrameLayout>
+
+    <TextView
+        android:id="@+id/artistTitle"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:ellipsize="end"
+        android:maxLines="2"
+        android:paddingStart="24dp"
+        android:paddingEnd="24dp"
+        android:textColor="@color/text_primary"
+        android:textSize="30sp"
+        android:textStyle="bold" />
+
+    <TextView
+        android:id="@+id/artistSongCount"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="4dp"
+        android:paddingStart="24dp"
+        android:paddingEnd="24dp"
+        android:textColor="@color/text_secondary"
+        android:textSize="14sp" />
+
     <LinearLayout
         android:layout_width="match_parent"
-        android:layout_height="64dp"
-        android:gravity="center_vertical"
-        android:orientation="horizontal"
-        android:paddingRight="16dp">
-
-        <FrameLayout
-            android:id="@+id/artistBack"
-            android:layout_width="56dp"
-            android:layout_height="56dp"
-            android:background="@drawable/player_cell_bg"
-            android:clickable="true"
-            android:contentDescription="@string/settings_back"
-            android:focusable="true">
-
-            <ImageView
-                android:layout_width="24dp"
-                android:layout_height="24dp"
-                android:layout_gravity="center"
-                android:contentDescription="@null"
-                android:src="@drawable/player_ic_back"
-                android:tint="#ECEFF1" />
-        </FrameLayout>
-
-        <TextView
-            android:id="@+id/artistTitle"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:ellipsize="end"
-            android:singleLine="true"
-            android:textColor="@color/text_primary"
-            android:textSize="20sp"
-            android:textStyle="bold" />
-
-        <TextView
-            android:id="@+id/artistSongCount"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginLeft="12dp"
-            android:textColor="@color/text_muted"
-            android:textSize="13sp" />
-    </LinearLayout>
-
-    <androidx.recyclerview.widget.RecyclerView
-        android:id="@+id/artistList"
-        android:layout_width="match_parent"
         android:layout_height="0dp"
-        android:layout_weight="1" />
+        android:layout_marginTop="20dp"
+        android:layout_weight="1"
+        android:background="@drawable/player_card_bg"
+        android:orientation="vertical">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="80dp"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:paddingStart="24dp"
+            android:paddingEnd="16dp">
+
+            <TextView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="@string/artist_songs_label"
+                android:textColor="#C7C7CC"
+                android:textSize="16sp" />
+
+            <FrameLayout
+                android:id="@+id/artistShuffle"
+                android:layout_width="52dp"
+                android:layout_height="52dp"
+                android:layout_marginEnd="12dp"
+                android:background="@drawable/player_round_button_bg"
+                android:clickable="true"
+                android:contentDescription="@string/library_shuffle_all"
+                android:focusable="true">
+
+                <ImageView
+                    android:layout_width="24dp"
+                    android:layout_height="24dp"
+                    android:layout_gravity="center"
+                    android:contentDescription="@null"
+                    android:src="@drawable/player_ic_shuffle"
+                    android:tint="#F5F5F7" />
+            </FrameLayout>
+
+            <FrameLayout
+                android:id="@+id/artistPlayAll"
+                android:layout_width="52dp"
+                android:layout_height="52dp"
+                android:background="@drawable/player_round_button_bg"
+                android:clickable="true"
+                android:contentDescription="@string/library_play_all"
+                android:focusable="true">
+
+                <ImageView
+                    android:layout_width="28dp"
+                    android:layout_height="28dp"
+                    android:layout_gravity="center"
+                    android:contentDescription="@null"
+                    android:src="@drawable/player_ic_play"
+                    android:tint="#F5F5F7" />
+            </FrameLayout>
+        </LinearLayout>
+
+        <androidx.recyclerview.widget.RecyclerView
+            android:id="@+id/artistList"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:clipToPadding="false"
+            android:paddingBottom="96dp" />
+    </LinearLayout>
 
 </LinearLayout>

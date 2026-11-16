@@ -202,9 +202,9 @@ class CoverAmbienceView @JvmOverloads constructor(
         const val SAMPLE_SIZE = 48
         const val GRID = 4
         const val CELL = SAMPLE_SIZE / GRID
-        const val BASE_COLOR = 0xFF0B0F19.toInt()
-        const val BASE_TRANSPARENT = 0x000B0F19
-        const val DIM_COLOR = 0xB4000000.toInt()
+        const val BASE_COLOR = 0xFF000000.toInt()
+        const val BASE_TRANSPARENT = 0x00000000
+        const val DIM_COLOR = 0xC8000000.toInt()
         const val EDGE_FRACTION = 0.2f
         const val FADE_NANOS = 600000000L
         const val OPAQUE = 255

@@ -1,67 +1,103 @@
 <?xml version="1.0" encoding="utf-8"?>
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
-    android:layout_height="wrap_content"
+    android:layout_height="80dp"
     android:background="?attr/selectableItemBackground"
     android:clickable="true"
     android:focusable="true"
     android:gravity="center_vertical"
-    android:minHeight="62dp"
     android:orientation="horizontal"
-    android:paddingLeft="16dp">
+    android:paddingStart="20dp">
 
-    <LinearLayout
-        android:layout_width="0dp"
-        android:layout_height="wrap_content"
-        android:layout_weight="1"
-        android:orientation="vertical"
-        android:paddingTop="8dp"
-        android:paddingBottom="8dp">
-
-        <TextView
-            android:id="@+id/trackTitle"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:ellipsize="end"
-            android:singleLine="true"
-            android:textColor="@color/text_primary"
-            android:textSize="16sp" />
-
-        <TextView
-            android:id="@+id/trackArtist"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="2dp"
-            android:ellipsize="end"
-            android:singleLine="true"
-            android:textColor="@color/text_secondary"
-            android:textSize="13sp" />
-    </LinearLayout>
-
-    <TextView
-        android:id="@+id/trackDuration"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_marginLeft="8dp"
-        android:textColor="@color/text_muted"
-        android:textSize="13sp" />
-
+    <!-- Cover thumbnail; the note shows while there is no cover -->
     <FrameLayout
-        android:id="@+id/trackMenu"
-        android:layout_width="48dp"
-        android:layout_height="48dp"
-        android:background="@drawable/player_cell_bg"
-        android:clickable="true"
-        android:contentDescription="@string/menu_more"
-        android:focusable="true">
+        android:id="@+id/trackThumb"
+        android:layout_width="56dp"
+        android:layout_height="56dp"
+        android:background="@drawable/player_thumb_bg">
 
         <ImageView
             android:layout_width="24dp"
             android:layout_height="24dp"
             android:layout_gravity="center"
             android:contentDescription="@null"
-            android:src="@drawable/player_ic_more"
-            android:tint="#CFD8DC" />
+            android:src="@drawable/player_ic_note"
+            android:tint="#6E6E73" />
+
+        <ImageView
+            android:id="@+id/trackArt"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:contentDescription="@null"
+            android:scaleType="centerCrop" />
     </FrameLayout>
+
+    <LinearLayout
+        android:layout_width="0dp"
+        android:layout_height="match_parent"
+        android:layout_marginStart="16dp"
+        android:layout_weight="1"
+        android:orientation="vertical">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:orientation="vertical">
+
+                <TextView
+                    android:id="@+id/trackTitle"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:ellipsize="end"
+                    android:singleLine="true"
+                    android:textColor="@color/text_primary"
+                    android:textSize="17sp" />
+
+                <TextView
+                    android:id="@+id/trackArtist"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="3dp"
+                    android:ellipsize="end"
+                    android:singleLine="true"
+                    android:textColor="@color/text_secondary"
+                    android:textSize="14sp" />
+            </LinearLayout>
+
+            <FrameLayout
+                android:id="@+id/trackMenu"
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:layout_marginEnd="8dp"
+                android:background="@drawable/player_cell_bg"
+                android:clickable="true"
+                android:contentDescription="@string/menu_more"
+                android:focusable="true">
+
+                <ImageView
+                    android:layout_width="22dp"
+                    android:layout_height="22dp"
+                    android:layout_gravity="center"
+                    android:contentDescription="@null"
+                    android:src="@drawable/player_ic_more"
+                    android:tint="#A1A1A6" />
+            </FrameLayout>
+        </LinearLayout>
+
+        <View
+            android:id="@+id/trackDivider"
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:layout_marginEnd="20dp"
+            android:background="@color/divider" />
+    </LinearLayout>
 
 </LinearLayout>

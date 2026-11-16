@@ -9,6 +9,7 @@ import androidx.recyclerview.widget.RecyclerView
 import me.Integer.Mediaplayer.R
 import me.Integer.Mediaplayer.library.LibraryRepository
 import me.Integer.Mediaplayer.library.Track
+import me.Integer.Mediaplayer.ui.widgets.PressFeedback
 
 /** One artist and every song they appear on, alone or with others. */
 class ArtistFragment : Fragment(R.layout.fragment_artist), LibraryRepository.Listener, PlayerHost.Listener {
@@ -29,7 +30,9 @@ class ArtistFragment : Fragment(R.layout.fragment_artist), LibraryRepository.Lis
         view.findViewById<TextView>(R.id.artistTitle).text =
             artistName.ifEmpty { getString(R.string.library_unknown_artist) }
         view.findViewById<View>(R.id.artistBack).setOnClickListener { (requireActivity() as Navigator).goBack() }
+        wireButtons(view)
         adapter = TrackAdapter(
+            thumbnails = ThumbnailLoader.get(requireContext()),
             artistLine = { track -> repository.displayArtist(track).ifEmpty { getString(R.string.library_unknown_artist) } },
             onClick = { index -> host.playTracks(tracks, index) },
             onMenu = { track, anchor -> TrackMenu.show(anchor, track, host, repository) }
@@ -37,6 +40,15 @@ class ArtistFragment : Fragment(R.layout.fragment_artist), LibraryRepository.Lis
         val list = view.findViewById<RecyclerView>(R.id.artistList)
         list.layoutManager = LinearLayoutManager(requireContext())
         list.adapter = adapter
+    }
+
+    private fun wireButtons(view: View) {
+        val shuffle = view.findViewById<View>(R.id.artistShuffle)
+        val play = view.findViewById<View>(R.id.artistPlayAll)
+        PressFeedback.attach(shuffle, null, ROUND_PRESS_SCALE)
+        PressFeedback.attach(play, null, ROUND_PRESS_SCALE)
+        shuffle.setOnClickListener { host.playAll(tracks, true) }
+        play.setOnClickListener { host.playAll(tracks, false) }
     }
 
     override fun onStart() {
@@ -72,6 +84,7 @@ class ArtistFragment : Fragment(R.layout.fragment_artist), LibraryRepository.Lis
 
     companion object {
         private const val ARG_NAME = "artist_name"
+        private const val ROUND_PRESS_SCALE = 0.9f
 
         fun create(name: String): ArtistFragment {
             return ArtistFragment().apply {

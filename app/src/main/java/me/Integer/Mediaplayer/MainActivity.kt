@@ -10,6 +10,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.Fragment
+import androidx.fragment.app.FragmentManager
 import me.Integer.Mediaplayer.library.CoverArtLoader
 import me.Integer.Mediaplayer.library.LibraryRepository
 import me.Integer.Mediaplayer.library.Track
@@ -18,20 +19,23 @@ import me.Integer.Mediaplayer.playback.NowPlayingListener
 import me.Integer.Mediaplayer.playback.PlayerConnection
 import me.Integer.Mediaplayer.ui.ArtistFragment
 import me.Integer.Mediaplayer.ui.LibraryFragment
+import me.Integer.Mediaplayer.ui.MiniPlayerBar
 import me.Integer.Mediaplayer.ui.Navigator
 import me.Integer.Mediaplayer.ui.NowPlayingFragment
 import me.Integer.Mediaplayer.ui.PlayerHost
 import me.Integer.Mediaplayer.ui.SettingsFragment
 import kotlin.math.roundToInt
+import kotlin.random.Random
 
 /**
- * Hosts the screens. It owns the one connection to the playback service and the cover of
- * the current song, and shares both with the fragments through [PlayerHost].
+ * Hosts the screens and the floating mini player. It owns the one connection to the
+ * playback service and the cover of the current song, and shares both through [PlayerHost].
  */
 class MainActivity : AppCompatActivity(), PlayerHost, Navigator, NowPlayingListener {
 
     private lateinit var repository: LibraryRepository
     private lateinit var artLoader: CoverArtLoader
+    private lateinit var miniBar: MiniPlayerBar
     private val listeners = ArrayList<PlayerHost.Listener>()
 
     override lateinit var connection: PlayerConnection
@@ -48,12 +52,22 @@ class MainActivity : AppCompatActivity(), PlayerHost, Navigator, NowPlayingListe
             if (!granted) Log.w(TAG, "notification permission denied, playback still works")
         }
 
+    /** The mini player hides on screens that have their own controls or need the space. */
+    private val screenWatcher = object : FragmentManager.FragmentLifecycleCallbacks() {
+        override fun onFragmentResumed(fm: FragmentManager, f: Fragment) {
+            if (f.id != R.id.mainContainer) return
+            miniBar.setSuppressed(f is NowPlayingFragment || f is SettingsFragment)
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
         repository = LibraryRepository.get(this)
         connection = PlayerConnection(this, this)
         artLoader = CoverArtLoader(this, (ART_SIZE_DP * resources.displayMetrics.density).roundToInt())
+        miniBar = MiniPlayerBar(findViewById(R.id.miniBar), this, this)
+        supportFragmentManager.registerFragmentLifecycleCallbacks(screenWatcher, false)
         repository.loadIfNeeded()
         if (savedInstanceState == null) {
             supportFragmentManager.beginTransaction()
@@ -65,14 +79,17 @@ class MainActivity : AppCompatActivity(), PlayerHost, Navigator, NowPlayingListe
     override fun onStart() {
         super.onStart()
         connection.connect()
+        miniBar.render()
     }
 
     override fun onStop() {
+        miniBar.stop()
         connection.release()
         super.onStop()
     }
 
     override fun onDestroy() {
+        supportFragmentManager.unregisterFragmentLifecycleCallbacks(screenWatcher)
         artLoader.shutdown()
         super.onDestroy()
     }
@@ -90,6 +107,13 @@ class MainActivity : AppCompatActivity(), PlayerHost, Navigator, NowPlayingListe
     override fun playTracks(tracks: List<Track>, startIndex: Int) {
         ensureNotificationPermission()
         connection.playTracks(tracks, startIndex) { repository.displayArtist(it) }
+    }
+
+    override fun playAll(tracks: List<Track>, shuffle: Boolean) {
+        if (tracks.isEmpty()) return
+        connection.setShuffle(shuffle)
+        val start = if (shuffle) Random.nextInt(tracks.size) else 0
+        playTracks(tracks, start)
     }
 
     override fun onNowPlaying(state: NowPlaying) {
@@ -116,6 +140,7 @@ class MainActivity : AppCompatActivity(), PlayerHost, Navigator, NowPlayingListe
 
     private fun notifyPlayerChanged() {
         for (listener in ArrayList(listeners)) listener.onPlayerChanged()
+        miniBar.render()
     }
 
     /** Android 13+ only shows the playback notification after this permission is granted. */

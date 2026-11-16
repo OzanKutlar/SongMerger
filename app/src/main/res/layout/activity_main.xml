@@ -1,8 +1,119 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Holds one screen at a time: library, artist, settings or the player. -->
+<!-- One screen at a time, with the floating mini player on top. -->
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
-    android:id="@+id/mainContainer"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:background="@color/background"
-    android:fitsSystemWindows="true" />
+    android:fitsSystemWindows="true">
+
+    <FrameLayout
+        android:id="@+id/mainContainer"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent" />
+
+    <!-- Mini player: background colour is set from the cover in code -->
+    <LinearLayout
+        android:id="@+id/miniBar"
+        android:layout_width="match_parent"
+        android:layout_height="68dp"
+        android:layout_gravity="bottom"
+        android:layout_margin="8dp"
+        android:clickable="true"
+        android:contentDescription="@string/player_open"
+        android:elevation="8dp"
+        android:focusable="true"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingStart="8dp"
+        android:paddingEnd="4dp"
+        android:visibility="gone">
+
+        <me.Integer.Mediaplayer.ui.widgets.VinylDiscView
+            android:id="@+id/miniVinyl"
+            android:layout_width="52dp"
+            android:layout_height="52dp" />
+
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="12dp"
+            android:layout_weight="1"
+            android:orientation="vertical">
+
+            <me.Integer.Mediaplayer.ui.widgets.MarqueeTextView
+                android:id="@+id/miniTitle"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:textColor="#FFFFFF"
+                android:textSize="17sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/miniArtist"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:ellipsize="end"
+                android:singleLine="true"
+                android:textColor="#E6E6EA"
+                android:textSize="14sp" />
+        </LinearLayout>
+
+        <FrameLayout
+            android:id="@+id/miniPrevious"
+            android:layout_width="48dp"
+            android:layout_height="match_parent"
+            android:background="@drawable/player_cell_bg"
+            android:clickable="true"
+            android:contentDescription="@string/player_previous"
+            android:focusable="true">
+
+            <ImageView
+                android:id="@+id/miniPreviousIcon"
+                android:layout_width="28dp"
+                android:layout_height="28dp"
+                android:layout_gravity="center"
+                android:contentDescription="@null"
+                android:src="@drawable/player_ic_previous"
+                android:tint="#FFFFFF" />
+        </FrameLayout>
+
+        <FrameLayout
+            android:id="@+id/miniPlay"
+            android:layout_width="48dp"
+            android:layout_height="match_parent"
+            android:background="@drawable/player_cell_bg"
+            android:clickable="true"
+            android:contentDescription="@string/player_play"
+            android:focusable="true">
+
+            <ImageView
+                android:id="@+id/miniPlayIcon"
+                android:layout_width="30dp"
+                android:layout_height="30dp"
+                android:layout_gravity="center"
+                android:contentDescription="@null"
+                android:src="@drawable/player_ic_play"
+                android:tint="#FFFFFF" />
+        </FrameLayout>
+
+        <FrameLayout
+            android:id="@+id/miniNext"
+            android:layout_width="48dp"
+            android:layout_height="match_parent"
+            android:background="@drawable/player_cell_bg"
+            android:clickable="true"
+            android:contentDescription="@string/player_next"
+            android:focusable="true">
+
+            <ImageView
+                android:id="@+id/miniNextIcon"
+                android:layout_width="28dp"
+                android:layout_height="28dp"
+                android:layout_gravity="center"
+                android:contentDescription="@null"
+                android:src="@drawable/player_ic_next"
+                android:tint="#FFFFFF" />
+        </FrameLayout>
+    </LinearLayout>
+
+</FrameLayout>

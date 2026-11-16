@@ -1,9 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="background">#FF0B0F19</color>
-    <color name="surface">#FF1A2436</color>
+    <color name="background">#FF000000</color>
+    <color name="surface">#FF1C1C1F</color>
+    <color name="card">#FF141416</color>
+    <color name="divider">#FF242427</color>
+    <color name="round_button">#FF26262A</color>
     <color name="accent">#FF00E676</color>
-    <color name="text_primary">#FFFFFFFF</color>
-    <color name="text_secondary">#FFCFD8DC</color>
-    <color name="text_muted">#FF607D8B</color>
+    <color name="text_primary">#FFF5F5F7</color>
+    <color name="text_secondary">#FFA1A1A6</color>
+    <color name="text_muted">#FF6E6E73</color>
 </resources>
