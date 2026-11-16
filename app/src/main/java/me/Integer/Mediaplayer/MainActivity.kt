@@ -157,45 +157,74 @@ class MainActivity : AppCompatActivity(), PlayerHost, Navigator, NowPlayingListe
     // ------------------------------------------------------------------ navigation
 
     override fun openNowPlaying() {
-        if (supportFragmentManager.findFragmentById(R.id.mainContainer) is NowPlayingFragment) return
-        open(NowPlayingFragment())
+        open(KEY_PLAYER, true) { NowPlayingFragment() }
     }
 
     override fun openArtist(name: String) {
-        open(ArtistFragment.create(name))
+        open(KEY_ARTIST + name.lowercase(), false) { ArtistFragment.create(name) }
     }
 
     override fun openAlbum(albumName: String) {
-        open(AlbumFragment.create(albumName))
+        open(KEY_ALBUM + albumName.lowercase(), false) { AlbumFragment.create(albumName) }
     }
 
     override fun openQueue() {
-        if (supportFragmentManager.findFragmentById(R.id.mainContainer) is QueueFragment) return
-        open(QueueFragment())
+        open(KEY_QUEUE, false) { QueueFragment() }
     }
 
     override fun openSettings() {
-        open(SettingsFragment())
+        open(KEY_SETTINGS, false) { SettingsFragment() }
     }
 
     override fun goBack() {
         onBackPressedDispatcher.onBackPressed()
     }
 
-    private fun open(fragment: Fragment) {
-        if (supportFragmentManager.isStateSaved) return
-        supportFragmentManager.beginTransaction()
-            .setCustomAnimations(
-                android.R.anim.fade_in, android.R.anim.fade_out,
-                android.R.anim.fade_in, android.R.anim.fade_out
+    /**
+     * Shows a screen once. If [key] is already on the back stack, the screens above it are
+     * closed and that one comes back to the front, instead of a second copy being stacked.
+     *
+     * @param slideUp true for the player, which rises from the bottom; other screens slide sideways
+     */
+    private fun open(key: String, slideUp: Boolean, create: () -> Fragment) {
+        val manager = supportFragmentManager
+        if (manager.isStateSaved) return
+        if (isOnBackStack(key)) {
+            manager.popBackStack(key, 0)
+            return
+        }
+        val transaction = manager.beginTransaction().setReorderingAllowed(true)
+        if (slideUp) {
+            transaction.setCustomAnimations(
+                R.anim.sheet_enter, R.anim.screen_hold,
+                R.anim.screen_hold, R.anim.sheet_exit
             )
-            .replace(R.id.mainContainer, fragment)
-            .addToBackStack(null)
-            .commit()
+        } else {
+            transaction.setCustomAnimations(
+                R.anim.screen_enter, R.anim.screen_exit,
+                R.anim.screen_pop_enter, R.anim.screen_pop_exit
+            )
+        }
+        transaction.replace(R.id.mainContainer, create()).addToBackStack(key).commit()
+    }
+
+    private fun isOnBackStack(key: String): Boolean {
+        val manager = supportFragmentManager
+        for (i in 0 until manager.backStackEntryCount) {
+            if (manager.getBackStackEntryAt(i).name == key) return true
+        }
+        return false
     }
 
     private companion object {
         const val TAG = "MainActivity"
         const val ART_SIZE_DP = 360
+
+        // Back stack names: one entry per screen, so a screen is never stacked twice.
+        const val KEY_PLAYER = "player"
+        const val KEY_QUEUE = "queue"
+        const val KEY_SETTINGS = "settings"
+        const val KEY_ARTIST = "artist:"
+        const val KEY_ALBUM = "album:"
     }
 }

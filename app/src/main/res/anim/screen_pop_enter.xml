@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Going back: the earlier screen returns from the left. -->
+<set xmlns:android="http://schemas.android.com/apk/res/android"
+    android:interpolator="@android:interpolator/decelerate_cubic"
+    android:shareInterpolator="true">
+    <translate
+        android:duration="280"
+        android:fromXDelta="-5%p"
+        android:toXDelta="0" />
+    <alpha
+        android:duration="280"
+        android:fromAlpha="0"
+        android:toAlpha="1" />
+</set>

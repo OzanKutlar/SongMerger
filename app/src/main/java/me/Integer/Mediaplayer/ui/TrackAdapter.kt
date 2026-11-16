@@ -43,11 +43,19 @@ class TrackAdapter(
         notifyDataSetChanged()
     }
 
-    @SuppressLint("NotifyDataSetChanged")
+    /** Only the two affected rows are rebound, so the highlight crossfades instead of the list flashing. */
     fun setPlaying(trackUri: String) {
         if (trackUri == playingUri) return
+        val previous = playingUri
         playingUri = trackUri
-        notifyDataSetChanged()
+        notifyRow(previous)
+        notifyRow(trackUri)
+    }
+
+    private fun notifyRow(trackUri: String) {
+        if (trackUri.isEmpty()) return
+        val index = tracks.indexOfFirst { it.uri == trackUri }
+        if (index >= 0) notifyItemChanged(index)
     }
 
     override fun getItemCount(): Int {

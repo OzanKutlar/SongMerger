@@ -3,6 +3,7 @@
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:background="@color/background"
+    android:animateLayoutChanges="true"
     android:orientation="vertical">
 
     <!-- Header: title, search, menu -->
@@ -270,6 +271,7 @@
 
             <androidx.recyclerview.widget.RecyclerView
                 android:id="@+id/libraryList"
+                android:layoutAnimation="@anim/list_cascade"
                 android:layout_width="match_parent"
                 android:layout_height="match_parent"
                 android:clipToPadding="false"

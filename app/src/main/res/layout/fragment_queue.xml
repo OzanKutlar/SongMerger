@@ -84,6 +84,7 @@
 
         <androidx.recyclerview.widget.RecyclerView
             android:id="@+id/queueList"
+            android:layoutAnimation="@anim/list_cascade"
             android:layout_width="match_parent"
             android:layout_height="match_parent"
             android:clipToPadding="false"

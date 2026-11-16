@@ -1,5 +1,6 @@
 package me.Integer.Mediaplayer.ui
 
+import android.animation.ArgbEvaluator
 import android.animation.ValueAnimator
 import android.os.Bundle
 import android.util.TypedValue
@@ -52,6 +53,7 @@ class LibraryFragment : Fragment(R.layout.fragment_library), LibraryRepository.L
     private var activeTab = TAB_SONGS
     private var query = ""
     private var tabsStyled = false
+    private var lastRowCount = 0
     private var visibleTracks: List<Track> = emptyList()
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
@@ -206,7 +208,7 @@ class LibraryFragment : Fragment(R.layout.fragment_library), LibraryRepository.L
         popup.setOnMenuItemClickListener { item ->
             repository.settings.trackSort = item.itemId
             refresh()
-            list.scrollToPosition(0)
+            replayRows()
             true
         }
         popup.show()
@@ -222,7 +224,7 @@ class LibraryFragment : Fragment(R.layout.fragment_library), LibraryRepository.L
         popup.setOnMenuItemClickListener { item ->
             repository.settings.artistSort = item.itemId
             refresh()
-            list.scrollToPosition(0)
+            replayRows()
             true
         }
         popup.show()
@@ -232,7 +234,13 @@ class LibraryFragment : Fragment(R.layout.fragment_library), LibraryRepository.L
         if (activeTab == tab) return
         activeTab = tab
         refresh()
+        replayRows()
+    }
+
+    /** New rows rise in one after another instead of popping in. */
+    private fun replayRows() {
         list.scrollToPosition(0)
+        list.scheduleLayoutAnimation()
     }
 
     // ------------------------------------------------------------------ rendering
@@ -244,6 +252,8 @@ class LibraryFragment : Fragment(R.layout.fragment_library), LibraryRepository.L
             TAB_ARTISTS -> showArtists(needle)
             else -> showSongs(repository.tracks, needle)
         }
+        if (lastRowCount == 0 && shown > 0) list.scheduleLayoutAnimation()
+        lastRowCount = shown
         renderTabs()
         renderCardHeader()
         renderEmpty(shown)
@@ -286,20 +296,29 @@ class LibraryFragment : Fragment(R.layout.fragment_library), LibraryRepository.L
         val targetPx = TypedValue.applyDimension(
             TypedValue.COMPLEX_UNIT_SP, if (selected) TAB_SELECTED_SP else TAB_IDLE_SP, metrics
         )
-        val color = if (selected) R.color.text_primary else R.color.text_muted
-        tab.setTextColor(ContextCompat.getColor(requireContext(), color))
+        val colorRes = if (selected) R.color.text_primary else R.color.text_muted
+        val targetColor = ContextCompat.getColor(requireContext(), colorRes)
         tabAnimators.remove(tab)?.cancel()
         if (!tabsStyled) {
+            tab.setTextColor(targetColor)
             tab.setTextSize(TypedValue.COMPLEX_UNIT_PX, targetPx)
             return
         }
-        if (abs(tab.textSize - targetPx) < 0.5f) return
-        val grow = ValueAnimator.ofFloat(tab.textSize, targetPx)
-        grow.duration = TAB_ANIMATION_MS
-        grow.interpolator = DecelerateInterpolator()
-        grow.addUpdateListener { tab.setTextSize(TypedValue.COMPLEX_UNIT_PX, it.animatedValue as Float) }
-        tabAnimators[tab] = grow
-        grow.start()
+        val startPx = tab.textSize
+        val startColor = tab.currentTextColor
+        if (abs(startPx - targetPx) < 0.5f && startColor == targetColor) return
+        // Size and colour blend together from wherever the tab is right now.
+        val blend = ArgbEvaluator()
+        val morph = ValueAnimator.ofFloat(0f, 1f)
+        morph.duration = TAB_ANIMATION_MS
+        morph.interpolator = DecelerateInterpolator()
+        morph.addUpdateListener {
+            val t = it.animatedFraction
+            tab.setTextSize(TypedValue.COMPLEX_UNIT_PX, startPx + (targetPx - startPx) * t)
+            tab.setTextColor(blend.evaluate(t, startColor, targetColor) as Int)
+        }
+        tabAnimators[tab] = morph
+        morph.start()
     }
 
     private fun renderCardHeader() {

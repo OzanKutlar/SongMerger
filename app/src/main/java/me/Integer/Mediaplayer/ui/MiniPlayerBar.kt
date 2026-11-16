@@ -83,12 +83,14 @@ class MiniPlayerBar(
             applyTint(host.currentArt)
         }
         vinyl.setPlaying(state.clockRunning && shown)
+        vinyl.setExpanded(state.playing)
         renderPlayIcon(state.playing)
     }
 
     /** Stops everything that animates; [render] picks it up again. */
     fun stop() {
         vinyl.setPlaying(false)
+        settlePlayIcon()
         colorAnimator?.end()
         colorAnimator = null
     }
@@ -113,11 +115,41 @@ class MiniPlayerBar(
 
     // ------------------------------------------------------------------ rendering
 
+    /** The icon shrinks away, swaps and grows back, like the big play button. */
     private fun renderPlayIcon(playing: Boolean) {
         if (iconPlaying == playing) return
+        val animate = iconPlaying != null && shown
         iconPlaying = playing
-        playIcon.setImageResource(if (playing) R.drawable.player_ic_pause else R.drawable.player_ic_play)
         playCell.contentDescription = if (playing) pauseDescription else playDescription
+        if (!animate) {
+            settlePlayIcon()
+            return
+        }
+        playIcon.animate().cancel()
+        playIcon.animate().scaleX(MORPH_SCALE).scaleY(MORPH_SCALE).alpha(0f)
+            .setDuration(MORPH_HALF_MS).setInterpolator(AccelerateInterpolator())
+            .withEndAction { growPlayIcon() }.start()
+    }
+
+    private fun growPlayIcon() {
+        val playing = iconPlaying ?: return
+        playIcon.setImageResource(iconFor(playing))
+        playIcon.animate().scaleX(1f).scaleY(1f).alpha(1f)
+            .setDuration(MORPH_HALF_MS).setInterpolator(DecelerateInterpolator()).start()
+    }
+
+    /** Ends a running morph at once with the right icon at full size. */
+    private fun settlePlayIcon() {
+        playIcon.animate().cancel()
+        val playing = iconPlaying ?: return
+        playIcon.setImageResource(iconFor(playing))
+        playIcon.scaleX = 1f
+        playIcon.scaleY = 1f
+        playIcon.alpha = 1f
+    }
+
+    private fun iconFor(playing: Boolean): Int {
+        return if (playing) R.drawable.player_ic_pause else R.drawable.player_ic_play
     }
 
     private fun applyTint(art: Bitmap?) {
@@ -169,5 +201,7 @@ class MiniPlayerBar(
         const val SHOW_MS = 220L
         const val HIDE_MS = 160L
         const val TINT_MS = 450L
+        const val MORPH_SCALE = 0.4f
+        const val MORPH_HALF_MS = 90L
     }
 }

@@ -497,6 +497,7 @@ class NowPlayingController(
         artistView.text = ""
         vinyl.showInPlace()
         vinyl.setPlaying(false)
+        vinyl.setExpanded(false)
         vinyl.setArt(null)
         ambience.setArt(null)
         setUsable(favoriteCell, false)
@@ -591,8 +592,10 @@ class NowPlayingController(
     private fun renderPlayState(current: NowPlaying, now: Long) {
         val optimistic = optimisticUntil != 0L && now < optimisticUntil && current.playing != optimisticPlaying
         if (!optimistic) optimisticUntil = 0L
-        renderPlayIcon(if (optimistic) optimisticPlaying else current.playing)
+        val wantsPlay = if (optimistic) optimisticPlaying else current.playing
+        renderPlayIcon(wantsPlay)
         vinyl.setPlaying(if (optimistic) optimisticPlaying else current.clockRunning)
+        vinyl.setExpanded(wantsPlay)
     }
 
     private fun renderPlayIcon(playing: Boolean) {

@@ -82,6 +82,8 @@ class VinylDiscView @JvmOverloads constructor(
     private var angle = 0f
     private var velocity = 0f
     private var spinning = false
+    private var expanded = false
+    private var discScale = RESTING_SCALE
     private var scrubActive = false
     private var rewindActive = false
     private var rewindRemaining = 0f
@@ -146,6 +148,18 @@ class VinylDiscView @JvmOverloads constructor(
     fun setPlaying(playing: Boolean) {
         if (spinning == playing) return
         spinning = playing
+        scheduleFrame()
+    }
+
+    /**
+     * The record rests slightly smaller and grows to full size while music plays. The size
+     * eases towards its target every frame, so quick toggles never jump.
+     */
+    fun setExpanded(value: Boolean) {
+        if (expanded == value) return
+        expanded = value
+        if (Motion.durationScale(context) <= 0f) discScale = targetScale()
+        invalidate()
         scheduleFrame()
     }
 
@@ -405,6 +419,7 @@ class VinylDiscView @JvmOverloads constructor(
             canvas.save()
         }
         canvas.translate(offset, 0f)
+        canvas.scale(discScale, discScale, cx, cy)
         canvas.save()
         canvas.rotate(angle, cx, cy)
         if (outgoing) drawOutgoingSurface(canvas) else drawSurface(canvas, progress)
@@ -585,7 +600,8 @@ class VinylDiscView @JvmOverloads constructor(
 
     private fun needsFrames(now: Long): Boolean {
         return (spinning && !scrubActive) || rewindActive || velocity > 0f || isCrossfading(now) ||
-            isOutgoingActive(now) || phase == PHASE_ENTERING || isSpringing(now)
+            isOutgoingActive(now) || phase == PHASE_ENTERING || isSpringing(now) ||
+            discScale != targetScale()
     }
 
     private fun scheduleFrame() {
@@ -610,7 +626,23 @@ class VinylDiscView @JvmOverloads constructor(
         }
     }
 
+    private fun targetScale(): Float {
+        return if (expanded) 1f else RESTING_SCALE
+    }
+
+    /** Each frame covers a fixed share of the remaining size change, then snaps when close. */
+    private fun advanceScale(dt: Float) {
+        val target = targetScale()
+        val gap = target - discScale
+        if (abs(gap) < SCALE_DONE) {
+            discScale = target
+            return
+        }
+        discScale += gap * minOf(1f, SCALE_RATE * dt)
+    }
+
     private fun advance(dt: Float) {
+        advanceScale(dt)
         if (scrubActive) {
             velocity = 0f
             return
@@ -656,6 +688,9 @@ class VinylDiscView @JvmOverloads constructor(
         const val REWIND_RATE = 5f // 1/s, share of the remaining turn per second
         const val REWIND_DONE_DEGREES = 0.5f
         const val SLIDE_FADE = 0.7f
+        const val RESTING_SCALE = 0.84f // size while paused
+        const val SCALE_RATE = 9f // 1/s, share of the remaining size change per second
+        const val SCALE_DONE = 0.002f
         const val PHASE_SHOWN = 0
         const val PHASE_HIDDEN = 1
         const val PHASE_ENTERING = 2
