@@ -31,7 +31,7 @@
             android:layout_marginTop="2dp"
             android:ellipsize="end"
             android:singleLine="true"
-            android:textColor="#CFD8DC"
+            android:textColor="#E6D7CF"
             android:textSize="17sp" />
     </LinearLayout>
 
@@ -49,7 +49,7 @@
             android:layout_width="52dp"
             android:layout_height="wrap_content"
             android:maxLines="1"
-            android:textColor="#CFD8DC"
+            android:textColor="#E6D7CF"
             android:textSize="13sp" />
 
         <SeekBar
@@ -71,7 +71,7 @@
             android:layout_height="wrap_content"
             android:gravity="end"
             android:maxLines="1"
-            android:textColor="#CFD8DC"
+            android:textColor="#E6D7CF"
             android:textSize="13sp" />
     </LinearLayout>
 
@@ -121,7 +121,7 @@
                 android:layout_gravity="center"
                 android:contentDescription="@null"
                 android:src="@drawable/player_ic_previous"
-                android:tint="#ECEFF1" />
+                android:tint="#FDF8F5" />
         </FrameLayout>
 
         <FrameLayout
@@ -157,7 +157,7 @@
                     android:contentDescription="@null"
                     android:padding="17dp"
                     android:src="@drawable/player_ic_play"
-                    android:tint="#000000" />
+                    android:tint="#FFFFFF" />
             </FrameLayout>
         </FrameLayout>
 
@@ -178,7 +178,7 @@
                 android:layout_gravity="center"
                 android:contentDescription="@null"
                 android:src="@drawable/player_ic_next"
-                android:tint="#ECEFF1" />
+                android:tint="#FDF8F5" />
         </FrameLayout>
 
         <FrameLayout

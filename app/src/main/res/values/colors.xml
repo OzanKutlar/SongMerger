@@ -1,12 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="background">#FF000000</color>
-    <color name="surface">#FF1C1C1F</color>
-    <color name="card">#FF141416</color>
-    <color name="divider">#FF242427</color>
-    <color name="round_button">#FF26262A</color>
-    <color name="accent">#FF00E676</color>
-    <color name="text_primary">#FFF5F5F7</color>
-    <color name="text_secondary">#FFA1A1A6</color>
-    <color name="text_muted">#FF6E6E73</color>
+    <color name="background">#FF09080A</color>
+    <color name="surface">#FF1A1619</color>
+    <color name="card">#FF131013</color>
+    <color name="divider">#FF262025</color>
+    <color name="round_button">#FF282024</color>
+    <color name="accent">#FFFF6D00</color>
+    <color name="accent_light">#FFFF9E40</color>
+    <color name="accent_deep">#FFD83400</color>
+    <color name="text_primary">#FFFDF8F5</color>
+    <color name="text_secondary">#FFB8AAA2</color>
+    <color name="text_muted">#FF7A6E67</color>
 </resources>

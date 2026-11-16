@@ -11,7 +11,7 @@ import android.util.Log
  */
 object CoverTint {
 
-    const val FALLBACK = 0xFF1F1F23.toInt()
+    const val FALLBACK = 0xFF281913.toInt()
 
     private const val TAG = "CoverTint"
     private const val SAMPLE = 24

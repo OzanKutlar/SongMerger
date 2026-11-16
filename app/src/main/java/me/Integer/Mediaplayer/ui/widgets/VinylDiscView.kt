@@ -782,14 +782,14 @@ class VinylDiscView @JvmOverloads constructor(
         const val HOLE_RIM_ALPHA = 153
         const val OPAQUE = 255
 
-        const val COLOR_DISC_CENTER = 0xFF1C1F26.toInt()
-        const val COLOR_DISC_EDGE = 0xFF07090D.toInt()
-        const val COLOR_GROOVE = 0xFF2E3440.toInt()
+        const val COLOR_DISC_CENTER = 0xFF261A15.toInt()
+        const val COLOR_DISC_EDGE = 0xFF0C0807.toInt()
+        const val COLOR_GROOVE = 0xFF3D2A22.toInt()
         const val COLOR_GROOVE_ON_ART = 0xFF000000.toInt()
-        const val COLOR_RIM = 0xFF3A4252.toInt()
-        const val COLOR_LABEL_EMPTY = 0xFF1A2436.toInt()
+        const val COLOR_RIM = 0xFF54392C.toInt()
+        const val COLOR_LABEL_EMPTY = 0xFF361F14.toInt()
         const val COLOR_HOLE_RIM = 0x99000000.toInt()
-        const val COLOR_ACCENT = 0xFF00E676.toInt()
+        const val COLOR_ACCENT = 0xFFFF6D00.toInt()
         const val COLOR_SHEEN = 0x14FFFFFF
 
         val FADE_INTERPOLATOR: Interpolator = DecelerateInterpolator()

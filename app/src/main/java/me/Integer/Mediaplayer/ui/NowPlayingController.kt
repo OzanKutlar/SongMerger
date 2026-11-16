@@ -828,9 +828,9 @@ class NowPlayingController(
         const val PULSE_END_SCALE = 1.35f
         const val DISABLED_ALPHA = 0.35f
 
-        const val COLOR_ON = 0xFF00E676.toInt()
-        const val COLOR_IDLE = 0xFFECEFF1.toInt()
-        const val COLOR_TIME = 0xFFCFD8DC.toInt()
+        const val COLOR_ON = 0xFFFF6D00.toInt()
+        const val COLOR_IDLE = 0xFFFDF8F5.toInt()
+        const val COLOR_TIME = 0xFFE6D7CF.toInt()
         const val NO_VALUE = Long.MIN_VALUE
         const val NO_MODE = -1
         const val NO_TIME = "--:--"

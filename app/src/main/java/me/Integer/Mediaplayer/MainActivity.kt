@@ -66,6 +66,9 @@ class MainActivity : AppCompatActivity(), PlayerHost, Navigator, NowPlayingListe
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            splashScreen.setOnExitAnimationListener { it.remove() }
+        }
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
         repository = LibraryRepository.get(this)
@@ -73,12 +76,12 @@ class MainActivity : AppCompatActivity(), PlayerHost, Navigator, NowPlayingListe
         artLoader = CoverArtLoader(this, (ART_SIZE_DP * resources.displayMetrics.density).roundToInt())
         miniBar = MiniPlayerBar(findViewById(R.id.miniBar), this, this)
         supportFragmentManager.registerFragmentLifecycleCallbacks(screenWatcher, false)
-        repository.loadIfNeeded()
         if (savedInstanceState == null) {
             supportFragmentManager.beginTransaction()
                 .replace(R.id.mainContainer, LibraryFragment())
-                .commit()
+                .commitNow()
         }
+        window.decorView.post { repository.loadIfNeeded() }
     }
 
     override fun onStart() {

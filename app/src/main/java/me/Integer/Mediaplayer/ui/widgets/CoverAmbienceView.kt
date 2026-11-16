@@ -29,6 +29,7 @@ class CoverAmbienceView @JvmOverloads constructor(
 ) : View(context, attrs, defStyleAttr) {
 
     private val fieldPaint = Paint(Paint.FILTER_BITMAP_FLAG)
+    private val glowPaint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val dimPaint = Paint().apply { color = DIM_COLOR }
     private val edgePaint = Paint()
     private val fieldSource = Rect(0, 0, GRID, GRID)
@@ -85,8 +86,15 @@ class CoverAmbienceView @JvmOverloads constructor(
         val h = height
         if (w <= 0 || h <= 0) {
             edgePaint.shader = null
+            glowPaint.shader = null
             return
         }
+        glowPaint.shader = LinearGradient(
+            0f, 0f, w.toFloat(), h.toFloat(),
+            intArrayOf(AMBIENT_TOP_COLOR, AMBIENT_MID_COLOR, BASE_COLOR),
+            floatArrayOf(0f, 0.52f, 1f),
+            Shader.TileMode.CLAMP
+        )
         edgePaint.shader = if (blendTop) {
             LinearGradient(0f, 0f, 0f, h * EDGE_FRACTION, BASE_COLOR, BASE_TRANSPARENT, Shader.TileMode.CLAMP)
         } else {
@@ -97,6 +105,7 @@ class CoverAmbienceView @JvmOverloads constructor(
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
         canvas.drawColor(BASE_COLOR)
+        if (glowPaint.shader != null) canvas.drawRect(fieldTarget, glowPaint)
         val progress = fadeProgress(System.nanoTime())
         val previous = previousField
         val current = currentField
@@ -202,9 +211,11 @@ class CoverAmbienceView @JvmOverloads constructor(
         const val SAMPLE_SIZE = 48
         const val GRID = 4
         const val CELL = SAMPLE_SIZE / GRID
-        const val BASE_COLOR = 0xFF000000.toInt()
-        const val BASE_TRANSPARENT = 0x00000000
-        const val DIM_COLOR = 0xC8000000.toInt()
+        const val BASE_COLOR = 0xFF09080A.toInt()
+        const val BASE_TRANSPARENT = 0x0009080A
+        const val AMBIENT_TOP_COLOR = 0xFF3A1908.toInt()
+        const val AMBIENT_MID_COLOR = 0xFF1C0E0A.toInt()
+        const val DIM_COLOR = 0xB809080A.toInt()
         const val EDGE_FRACTION = 0.2f
         const val FADE_NANOS = 600000000L
         const val OPAQUE = 255

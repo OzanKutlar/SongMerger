@@ -1,60 +1,87 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- A vinyl record with a green label and a play triangle, inside the adaptive icon safe zone. -->
+<!-- Sleek rounded box tile with gradients and a bold white play arrow inside the safe zone. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
     android:width="108dp"
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-    <!-- Record -->
+
+    <!-- Soft ambient drop shadow beneath the box -->
     <path
-        android:fillColor="#FF1B1F27"
-        android:pathData="M24,54a30,30 0,1 0,60 0a30,30 0,1 0,-60 0"
-        android:strokeColor="#FF00E676"
-        android:strokeWidth="1.6" />
-    <!-- Grooves -->
+        android:fillColor="#36000000"
+        android:pathData="M40,31h28a13,13 0,0 1,13 13v28a13,13 0,0 1,-13 13h-28a13,13 0,0 1,-13 -13v-28a13,13 0,0 1,13 -13z" />
+
+    <!-- Outer sleek box body with warm obsidian-orange gradient -->
+    <path android:pathData="M40,28h28a12,12 0,0 1,12 12v28a12,12 0,0 1,-12 12h-28a12,12 0,0 1,-12 -12v-28a12,12 0,0 1,12 -12z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:startX="28"
+                android:startY="28"
+                android:endX="80"
+                android:endY="80"
+                android:type="linear">
+                <item android:offset="0.0" android:color="#FF2B1912" />
+                <item android:offset="0.55" android:color="#FF19100D" />
+                <item android:offset="1.0" android:color="#FF0E0908" />
+            </gradient>
+        </aapt:attr>
+        <aapt:attr name="android:strokeColor">
+            <gradient
+                android:startX="30"
+                android:startY="28"
+                android:endX="78"
+                android:endY="80"
+                android:type="linear">
+                <item android:offset="0.0" android:color="#B3FFF3E0" />
+                <item android:offset="0.5" android:color="#66FF9100" />
+                <item android:offset="1.0" android:color="#33FF3D00" />
+            </gradient>
+        </aapt:attr>
+        <android:attr name="android:strokeWidth">1.6</android:attr>
+    </path>
+
+    <!-- Top-half glass highlight inside the box -->
+    <path android:pathData="M40,29.5h28a10.5,10.5 0,0 1,10.5 10.5v11C66,55 42,55 29.5,51v-11a10.5,10.5 0,0 1,10.5 -10.5z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:startX="54"
+                android:startY="29"
+                android:endX="54"
+                android:endY="55"
+                android:type="linear">
+                <item android:offset="0.0" android:color="#2EFFFFFF" />
+                <item android:offset="1.0" android:color="#00FFFFFF" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- Inner glowing orange accent frame -->
     <path
-        android:pathData="M28,54a26,26 0,1 0,52 0a26,26 0,1 0,-52 0"
-        android:strokeColor="#FF2C323E"
-        android:strokeWidth="0.9" />
+        android:pathData="M41.5,33h25a8.5,8.5 0,0 1,8.5 8.5v25a8.5,8.5 0,0 1,-8.5 8.5h-25a8.5,8.5 0,0 1,-8.5 -8.5v-25a8.5,8.5 0,0 1,8.5 -8.5z"
+        android:strokeColor="#2EFF9100"
+        android:strokeWidth="1.0" />
+
+    <!-- Sleek trailing motion/equalizer bar on the left -->
     <path
-        android:pathData="M32.5,54a21.5,21.5 0,1 0,43 0a21.5,21.5 0,1 0,-43 0"
-        android:strokeColor="#FF2C323E"
-        android:strokeWidth="0.9" />
-    <path
-        android:pathData="M37,54a17,17 0,1 0,34 0a17,17 0,1 0,-34 0"
-        android:strokeColor="#FF2C323E"
-        android:strokeWidth="0.9" />
-    <!-- Glare -->
-    <path
-        android:pathData="M30.44,43A26,26 0,0 1,43 30.44"
-        android:strokeAlpha="0.3"
-        android:strokeColor="#FFFFFFFF"
+        android:pathData="M41.5,45.5L41.5,62.5"
+        android:strokeColor="#CCFF9E40"
         android:strokeLineCap="round"
-        android:strokeWidth="2.2" />
-    <path
-        android:pathData="M77.56,65A26,26 0,0 1,65 77.56"
-        android:strokeAlpha="0.3"
-        android:strokeColor="#FFFFFFFF"
-        android:strokeLineCap="round"
-        android:strokeWidth="2.2" />
-    <path
-        android:pathData="M35.87,45.55A20,20 0,0 1,45.55 35.87"
-        android:strokeAlpha="0.18"
-        android:strokeColor="#FFFFFFFF"
-        android:strokeLineCap="round"
-        android:strokeWidth="1.6" />
-    <path
-        android:pathData="M72.13,62.45A20,20 0,0 1,62.45 72.13"
-        android:strokeAlpha="0.18"
-        android:strokeColor="#FFFFFFFF"
-        android:strokeLineCap="round"
-        android:strokeWidth="1.6" />
-    <!-- Label -->
-    <path
-        android:fillColor="#FF00E676"
-        android:pathData="M42,54a12,12 0,1 0,24 0a12,12 0,1 0,-24 0" />
-    <!-- Play -->
-    <path
-        android:fillColor="#FF0B0E14"
-        android:pathData="M50,47.5L50,60.5L61,54Z" />
+        android:strokeWidth="3.4" />
+
+    <!-- Modern rounded white gradient play arrow -->
+    <path android:pathData="M47.5,42.8C47.5,41.1 49.35,40.05 50.82,40.92L66.4,50.12C67.84,50.97 67.84,53.03 66.4,53.88L50.82,63.08C49.35,63.95 47.5,62.9 47.5,61.2Z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:startX="47.5"
+                android:startY="40"
+                android:endX="67.5"
+                android:endY="64"
+                android:type="linear">
+                <item android:offset="0.0" android:color="#FFFFFFFF" />
+                <item android:offset="0.65" android:color="#FFFFF3E0" />
+                <item android:offset="1.0" android:color="#FFFFCC80" />
+            </gradient>
+        </aapt:attr>
+    </path>
 </vector>

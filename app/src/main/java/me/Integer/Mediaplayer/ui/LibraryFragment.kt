@@ -21,9 +21,11 @@ import me.Integer.Mediaplayer.R
 import me.Integer.Mediaplayer.library.ArtistSorter
 import me.Integer.Mediaplayer.library.LibraryRepository
 import me.Integer.Mediaplayer.library.PlaylistImporter
+import android.view.ViewGroup
 import me.Integer.Mediaplayer.library.Track
 import me.Integer.Mediaplayer.library.TrackSorter
 import me.Integer.Mediaplayer.ui.widgets.PressFeedback
+import me.Integer.Mediaplayer.ui.widgets.SkeletonDrawable
 import java.util.Locale
 import java.util.concurrent.Executors
 import kotlin.math.abs
@@ -68,6 +70,8 @@ class LibraryFragment : Fragment(R.layout.fragment_library), LibraryRepository.L
     private var activeTab = TAB_SONGS
     private var query = ""
     private var tabsStyled = false
+    private var initialBatchReady = false
+    private var shownPlaylistCount = 0
     private var lastRowCount = 0
     private var visibleTracks: List<Track> = emptyList()
 
@@ -78,10 +82,16 @@ class LibraryFragment : Fragment(R.layout.fragment_library), LibraryRepository.L
         navigator = requireActivity() as Navigator
         activeTab = savedInstanceState?.getInt(KEY_TAB, TAB_SONGS) ?: activeTab
         tabsStyled = false
+        initialBatchReady = repository.isLoaded && repository.tracks.isNotEmpty()
         bindViews(view)
         createAdapters()
         wireHeader(view)
         wireCard()
+        renderTabs()
+        if (!initialBatchReady) {
+            showSkeleton()
+            renderCardHeader()
+        }
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
@@ -121,6 +131,10 @@ class LibraryFragment : Fragment(R.layout.fragment_library), LibraryRepository.L
 
     override fun onScanState(state: LibraryRepository.ScanState) {
         renderScan(state)
+        if (state.running && repository.tracks.isEmpty()) {
+            showSkeleton()
+            renderCardHeader()
+        }
     }
 
     override fun onPlayerChanged() {
@@ -305,41 +319,64 @@ class LibraryFragment : Fragment(R.layout.fragment_library), LibraryRepository.L
 
     private fun refresh() {
         renderTabs()
-        renderCardHeader()
         renderScan(repository.scanState)
-        if (activeTab != TAB_PLAYLISTS && !repository.isLoaded && repository.tracks.isEmpty()) {
+        if ((!repository.isLoaded || repository.scanState.running) && repository.tracks.isEmpty()) {
             refreshGeneration++
             showSkeleton()
+            renderCardHeader()
             return
         }
         val gen = ++refreshGeneration
         val libVer = libraryVersion
         val needle = query.trim().lowercase(Locale.ROOT)
         when (activeTab) {
-            TAB_ARTISTS -> refreshArtists(gen, libVer, needle)
-            TAB_PLAYLISTS -> refreshPlaylists(gen, libVer, needle)
-            TAB_FAVORITES -> refreshSongs(gen, libVer, repository.favoriteTracks(), needle)
-            else -> refreshSongs(gen, libVer, repository.tracks, needle)
+            TAB_ARTISTS -> {
+                if (artistAdapter.rows().isEmpty()) showSkeleton()
+                renderCardHeader()
+                refreshArtists(gen, libVer, needle)
+            }
+            TAB_PLAYLISTS -> {
+                if (playlistAdapter.rows().isEmpty()) showSkeleton()
+                renderCardHeader()
+                refreshPlaylists(gen, libVer, needle)
+            }
+            TAB_FAVORITES -> {
+                if (trackAdapter.rows().isEmpty()) showSkeleton()
+                renderCardHeader()
+                refreshSongs(gen, libVer, favoritesOnly = true, needle = needle)
+            }
+            else -> {
+                if (trackAdapter.rows().isEmpty()) showSkeleton()
+                renderCardHeader()
+                refreshSongs(gen, libVer, favoritesOnly = false, needle = needle)
+            }
         }
     }
 
     private fun showSkeleton() {
         emptyView.visibility = View.GONE
-        if (activeTab == TAB_ARTISTS) {
-            artistAdapter.setLoading(true)
-            if (list.adapter !== artistAdapter) list.adapter = artistAdapter
-        } else {
-            trackAdapter.setLoading(true)
-            if (list.adapter !== trackAdapter) list.adapter = trackAdapter
+        when (activeTab) {
+            TAB_ARTISTS -> {
+                artistAdapter.setLoading(true)
+                if (list.adapter !== artistAdapter) list.adapter = artistAdapter
+            }
+            TAB_PLAYLISTS -> {
+                playlistAdapter.setLoading(true)
+                if (list.adapter !== playlistAdapter) list.adapter = playlistAdapter
+            }
+            else -> {
+                trackAdapter.setLoading(true)
+                if (list.adapter !== trackAdapter) list.adapter = trackAdapter
+            }
         }
     }
 
-    private fun refreshSongs(gen: Long, libVer: Long, source: List<Track>, needle: String) {
+    private fun refreshSongs(gen: Long, libVer: Long, favoritesOnly: Boolean, needle: String) {
         val trackSort = repository.settings.trackSort
-        val artistLines = source.associate { it.uri to repository.displayArtist(it) }
         val oldRows = if (list.adapter === trackAdapter && !trackAdapter.isLoading) trackAdapter.rows() else emptyList()
         val canDiff = oldRows.isNotEmpty() && lastDiffLibVersion == libVer
         worker.execute {
+            val source = if (favoritesOnly) repository.favoriteTracks() else repository.tracks
             val matching = if (needle.isEmpty()) {
                 source
             } else {
@@ -348,10 +385,12 @@ class LibraryFragment : Fragment(R.layout.fragment_library), LibraryRepository.L
                         track.artistTag.lowercase(Locale.ROOT).contains(needle)
                 }
             }
+            val artistLines = matching.associate { it.uri to repository.displayArtist(it) }
             val sorted = TrackSorter.sort(matching, trackSort) { artistLines[it.uri].orEmpty() }
             val diff = if (canDiff && sorted.isNotEmpty()) TrackAdapter.diff(oldRows, sorted) else null
             main.post {
                 if (!isAdded || gen != refreshGeneration) return@post
+                initialBatchReady = true
                 lastDiffLibVersion = libVer
                 visibleTracks = sorted
                 trackAdapter.submit(sorted, diff)
@@ -362,11 +401,11 @@ class LibraryFragment : Fragment(R.layout.fragment_library), LibraryRepository.L
     }
 
     private fun refreshArtists(gen: Long, libVer: Long, needle: String) {
-        val source = repository.artists()
         val artistSort = repository.settings.artistSort
         val oldRows = if (list.adapter === artistAdapter && !artistAdapter.isLoading) artistAdapter.rows() else emptyList()
         val canDiff = oldRows.isNotEmpty() && lastDiffLibVersion == libVer
         worker.execute {
+            val source = repository.artists()
             val matching = if (needle.isEmpty()) {
                 source
             } else {
@@ -376,6 +415,7 @@ class LibraryFragment : Fragment(R.layout.fragment_library), LibraryRepository.L
             val diff = if (canDiff && sorted.isNotEmpty()) ArtistAdapter.diff(oldRows, sorted) else null
             main.post {
                 if (!isAdded || gen != refreshGeneration) return@post
+                initialBatchReady = true
                 lastDiffLibVersion = libVer
                 artistAdapter.submit(sorted, diff)
                 if (list.adapter !== artistAdapter) list.adapter = artistAdapter
@@ -385,10 +425,10 @@ class LibraryFragment : Fragment(R.layout.fragment_library), LibraryRepository.L
     }
 
     private fun refreshPlaylists(gen: Long, libVer: Long, needle: String) {
-        val source = repository.playlists.all()
-        val oldRows = if (list.adapter === playlistAdapter) playlistAdapter.rows() else emptyList()
+        val oldRows = if (list.adapter === playlistAdapter && !playlistAdapter.isLoading) playlistAdapter.rows() else emptyList()
         val canDiff = oldRows.isNotEmpty() && lastDiffLibVersion == libVer
         worker.execute {
+            val source = repository.playlists.all()
             val matching = if (needle.isEmpty()) {
                 source
             } else {
@@ -397,6 +437,8 @@ class LibraryFragment : Fragment(R.layout.fragment_library), LibraryRepository.L
             val diff = if (canDiff && matching.isNotEmpty()) PlaylistAdapter.diff(oldRows, matching) else null
             main.post {
                 if (!isAdded || gen != refreshGeneration) return@post
+                initialBatchReady = true
+                shownPlaylistCount = source.size
                 lastDiffLibVersion = libVer
                 playlistAdapter.submit(matching, diff)
                 if (list.adapter !== playlistAdapter) list.adapter = playlistAdapter
@@ -451,6 +493,10 @@ class LibraryFragment : Fragment(R.layout.fragment_library), LibraryRepository.L
         morph.start()
     }
 
+    private fun isHeaderSkeletonActive(): Boolean {
+        return !initialBatchReady || ((!repository.isLoaded || repository.scanState.running) && repository.tracks.isEmpty())
+    }
+
     private fun renderCardHeader() {
         val showingSongs = activeTab == TAB_SONGS || activeTab == TAB_FAVORITES
         val showingPlaylists = activeTab == TAB_PLAYLISTS
@@ -458,16 +504,35 @@ class LibraryFragment : Fragment(R.layout.fragment_library), LibraryRepository.L
         shuffleButton.visibility = buttons
         playAllButton.visibility = buttons
         addButton.visibility = if (showingPlaylists) View.VISIBLE else View.GONE
-        sortIcon.visibility = if (showingPlaylists) View.GONE else View.VISIBLE
-        sortButton.isClickable = !showingPlaylists
-        val playlistCount = if (showingPlaylists) repository.playlists.all().size else 0
-        sortLabel.text = when {
-            showingSongs -> getString(TRACK_SORT_LABELS[repository.settings.trackSort])
-            showingPlaylists ->
-                resources.getQuantityString(R.plurals.library_playlist_count, playlistCount, playlistCount)
-            else -> getString(ARTIST_SORT_LABELS[repository.settings.artistSort])
+        val loadingHeader = isHeaderSkeletonActive()
+        if (loadingHeader) {
+            sortIcon.visibility = View.GONE
+            sortButton.isClickable = false
+            sortLabel.text = ""
+            sortLabel.background = SkeletonDrawable.bar(requireContext(), 6f)
+            val params = sortLabel.layoutParams
+            val targetWidth = (110 * resources.displayMetrics.density).toInt()
+            if (params.width != targetWidth) {
+                params.width = targetWidth
+                sortLabel.layoutParams = params
+            }
+        } else {
+            sortLabel.background = null
+            val params = sortLabel.layoutParams
+            if (params.width != ViewGroup.LayoutParams.WRAP_CONTENT) {
+                params.width = ViewGroup.LayoutParams.WRAP_CONTENT
+                sortLabel.layoutParams = params
+            }
+            sortIcon.visibility = if (showingPlaylists) View.GONE else View.VISIBLE
+            sortButton.isClickable = !showingPlaylists
+            sortLabel.text = when {
+                showingSongs -> getString(TRACK_SORT_LABELS[repository.settings.trackSort])
+                showingPlaylists ->
+                    resources.getQuantityString(R.plurals.library_playlist_count, shownPlaylistCount, shownPlaylistCount)
+                else -> getString(ARTIST_SORT_LABELS[repository.settings.artistSort])
+            }
         }
-        val usable = visibleTracks.isNotEmpty()
+        val usable = !loadingHeader && visibleTracks.isNotEmpty()
         shuffleButton.isEnabled = usable
         playAllButton.isEnabled = usable
         shuffleButton.alpha = if (usable) 1f else DISABLED_ALPHA
@@ -475,6 +540,10 @@ class LibraryFragment : Fragment(R.layout.fragment_library), LibraryRepository.L
     }
 
     private fun renderEmpty(shownRows: Int) {
+        if (isHeaderSkeletonActive()) {
+            emptyView.visibility = View.GONE
+            return
+        }
         emptyView.visibility = if (shownRows == 0) View.VISIBLE else View.GONE
         if (shownRows > 0) return
         val message = when {

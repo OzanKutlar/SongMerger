@@ -83,8 +83,8 @@ class SkeletonDrawable(
     override fun getOpacity(): Int = PixelFormat.OPAQUE
 
     companion object {
-        private const val BASE_COLOR = 0xFF23252A.toInt()
-        private const val HIGHLIGHT_COLOR = 0xFF343842.toInt()
+        private const val BASE_COLOR = 0xFF262024.toInt()
+        private const val HIGHLIGHT_COLOR = 0xFF3D3035.toInt()
         private const val CYCLE_MS = 1200L
         private const val SWEEP_FRACTION = 0.7f
         private const val TILT_RATIO = 0.25f

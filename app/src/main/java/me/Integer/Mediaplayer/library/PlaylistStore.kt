@@ -19,11 +19,19 @@ class PlaylistStore(context: Context, private val onChanged: () -> Unit) {
     private val file = AtomicFile(File(context.applicationContext.filesDir, FILE_NAME))
     private var loaded: MutableList<Playlist>? = null
 
+    /** Warms the in-memory playlist cache off the main thread. */
+    @Synchronized
+    fun preload() {
+        items()
+    }
+
     /** Every playlist, sorted by name. */
+    @Synchronized
     fun all(): List<Playlist> {
         return items().sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER) { it.name })
     }
 
+    @Synchronized
     fun get(id: Long): Playlist? {
         return items().firstOrNull { it.id == id }
     }
@@ -160,9 +168,8 @@ class PlaylistStore(context: Context, private val onChanged: () -> Unit) {
         write(items())
         onChanged()
     }
-
-    private fun items(): MutableList<Playlist> {
-        loaded?.let { return it }
+    @Synchronized
+    private fun items(): MutableList<Playlist> {        loaded?.let { return it }
         val read = read()
         loaded = read
         return read

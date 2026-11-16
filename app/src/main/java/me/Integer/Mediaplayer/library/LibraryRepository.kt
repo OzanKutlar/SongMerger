@@ -45,8 +45,12 @@ class LibraryRepository private constructor(appContext: Context) {
     private val artistsOfCache = HashMap<String, List<String>>()
     private val displayArtistCache = HashMap<String, String>()
 
+    private val cacheLock = Any()
+
+    @Volatile
     var isLoaded: Boolean = false
         private set
+    @Volatile
     var tracks: List<Track> = emptyList()
         private set
     var scanState = ScanState(false, 0, 0)
@@ -70,6 +74,10 @@ class LibraryRepository private constructor(appContext: Context) {
         loadStarted = true
         worker.execute {
             val cached = index.load()
+            playlists.preload()
+            for (track in cached) {
+                displayArtist(track)
+            }
             main.post {
                 isLoaded = true
                 if (tracks.isEmpty() && cached.isNotEmpty()) {
@@ -164,21 +172,27 @@ class LibraryRepository private constructor(appContext: Context) {
 
     /** The individual artists of a song: the manual split if there is one, else automatic. */
     fun artistsOf(track: Track): List<String> {
-        return artistsOfCache.getOrPut(track.uri) {
-            overrides.get(track.uri) ?: ArtistSplitter.split(track.artistTag, settings.artistSeparator)
+        synchronized(cacheLock) {
+            return artistsOfCache.getOrPut(track.uri) {
+                overrides.get(track.uri) ?: ArtistSplitter.split(track.artistTag, settings.artistSeparator)
+            }
         }
     }
 
     /** The artists of a song as one display line; empty when unknown. */
     fun displayArtist(track: Track): String {
-        return displayArtistCache.getOrPut(track.uri) {
-            ArtistSplitter.join(artistsOf(track), settings.artistSeparator)
+        synchronized(cacheLock) {
+            return displayArtistCache.getOrPut(track.uri) {
+                ArtistSplitter.join(artistsOf(track), settings.artistSeparator)
+            }
         }
     }
 
     /** Every artist with their songs. A song with several artists is listed under each. */
     fun artists(): List<Artist> {
-        return artistsCache ?: ArtistGrouper.group(tracks) { artistsOf(it) }.also { artistsCache = it }
+        synchronized(cacheLock) {
+            return artistsCache ?: ArtistGrouper.group(tracks) { artistsOf(it) }.also { artistsCache = it }
+        }
     }
 
     /** Call after changing the separator, favorites or a manual split, so the screens update. */
@@ -190,9 +204,11 @@ class LibraryRepository private constructor(appContext: Context) {
     // ------------------------------------------------------------------ helpers
 
     private fun invalidateArtistCaches() {
-        artistsCache = null
-        artistsOfCache.clear()
-        displayArtistCache.clear()
+        synchronized(cacheLock) {
+            artistsCache = null
+            artistsOfCache.clear()
+            displayArtistCache.clear()
+        }
     }
 
     private fun notifyListenersChanged() {
