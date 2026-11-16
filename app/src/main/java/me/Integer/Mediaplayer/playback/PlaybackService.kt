@@ -32,6 +32,9 @@ class PlaybackService : MediaSessionService() {
     private var player: ExoPlayer? = null
     private var artLoader: EmbeddedArtBitmapLoader? = null
 
+    /** Blends mashup steps into each other; idle for normal songs. */
+    private var crossfader: DjCrossfader? = null
+
     private var shuffleOn = false
 
     /** Slot ids in the order to return to when shuffle is turned off. */
@@ -88,6 +91,7 @@ class PlaybackService : MediaSessionService() {
         artLoader = loader
         val exo = buildPlayer()
         player = exo
+        crossfader = DjCrossfader(this, exo)
         session = MediaSession.Builder(this, exo)
             .setCallback(sessionCallback)
             .setSessionActivity(openAppIntent())
@@ -106,6 +110,8 @@ class PlaybackService : MediaSessionService() {
     }
 
     override fun onDestroy() {
+        crossfader?.release()
+        crossfader = null
         session?.let { current ->
             current.player.release()
             current.release()
@@ -144,6 +150,7 @@ class PlaybackService : MediaSessionService() {
     private fun setShuffle(enabled: Boolean) {
         if (shuffleOn == enabled) return
         shuffleOn = enabled
+        crossfader?.abort()
         val exo = player ?: return
         val current = currentUids(exo)
         if (enabled) {

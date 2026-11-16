@@ -13,6 +13,7 @@ import androidx.fragment.app.Fragment
 import androidx.fragment.app.FragmentManager
 import me.Integer.Mediaplayer.library.CoverArtLoader
 import me.Integer.Mediaplayer.library.LibraryRepository
+import me.Integer.Mediaplayer.library.MixSegment
 import me.Integer.Mediaplayer.library.Track
 import me.Integer.Mediaplayer.playback.NowPlaying
 import me.Integer.Mediaplayer.playback.NowPlayingListener
@@ -118,6 +119,20 @@ class MainActivity : AppCompatActivity(), PlayerHost, Navigator, NowPlayingListe
         ensureNotificationPermission()
         val start = if (shuffle) Random.nextInt(tracks.size) else 0
         connection.playTracks(tracks, start, shuffle) { repository.displayArtist(it) }
+    }
+
+    override fun playMix(segments: List<MixSegment>, startIndex: Int) {
+        val steps = ArrayList<Pair<Track, MixSegment>>(segments.size)
+        var keptBefore = 0
+        for ((index, segment) in segments.withIndex()) {
+            val track = repository.findTrack(segment.trackUri) ?: continue
+            if (index < startIndex) keptBefore++
+            steps.add(track to segment)
+        }
+        if (steps.isEmpty()) return
+        ensureNotificationPermission()
+        val start = keptBefore.coerceAtMost(steps.size - 1)
+        connection.playMix(steps, start) { repository.displayArtist(it) }
     }
 
     override fun onNowPlaying(state: NowPlaying) {

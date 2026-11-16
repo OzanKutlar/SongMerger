@@ -1,6 +1,7 @@
 package me.Integer.Mediaplayer.ui
 
 import android.graphics.Bitmap
+import me.Integer.Mediaplayer.library.MixSegment
 import me.Integer.Mediaplayer.library.Track
 import me.Integer.Mediaplayer.playback.NowPlaying
 import me.Integer.Mediaplayer.playback.PlayerConnection
@@ -31,6 +32,12 @@ interface PlayerHost {
 
     /** Plays all [tracks]: in order from the first, or shuffled from a random one. */
     fun playAll(tracks: List<Track>, shuffle: Boolean)
+
+    /**
+     * Plays a mashup with DJ transitions, starting at step [startIndex]. Steps whose song is
+     * no longer in the library are left out.
+     */
+    fun playMix(segments: List<MixSegment>, startIndex: Int)
 }
 
 /** Screen changes, handled by the activity. */

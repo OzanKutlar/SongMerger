@@ -19,6 +19,7 @@ import androidx.media3.session.SessionCommand
 import androidx.media3.session.SessionResult
 import androidx.media3.session.SessionToken
 import com.google.common.util.concurrent.ListenableFuture
+import me.Integer.Mediaplayer.library.MixSegment
 import me.Integer.Mediaplayer.library.Track
 import java.util.concurrent.CancellationException
 import java.util.concurrent.ExecutionException
@@ -51,6 +52,8 @@ class PlayerConnection(context: Context, private val listener: NowPlayingListene
 
     private val playerListener = object : Player.Listener {
         override fun onEvents(player: Player, events: Player.Events) {
+            // A DJ crossfade changes the volume many times a second; nothing on screen shows it.
+            if (events.size() == 1 && events.contains(Player.EVENT_VOLUME_CHANGED)) return
             publish()
         }
     }
@@ -197,6 +200,30 @@ class PlayerConnection(context: Context, private val listener: NowPlayingListene
         player.play()
     }
 
+    /**
+     * Replaces the queue with a mashup and starts at step [startIndex]. Each step plays only
+     * its part of the song and blends into the next one. Shuffle is turned off, because the
+     * steps were chosen for this order.
+     *
+     * @param steps each song with the part of it to play, in playing order
+     */
+    fun playMix(steps: List<Pair<Track, MixSegment>>, startIndex: Int, artistOf: (Track) -> String) {
+        val player = controller ?: return
+        if (steps.isEmpty()) return
+        val items = steps.take(MAX_QUEUE).map { (track, segment) -> toItem(track, artistOf(track), segment) }
+        val index = startIndex.coerceIn(0, items.size - 1)
+        shuffleEnabled = false
+        val args = Bundle().apply {
+            putBoolean(QueueCommands.ARG_ENABLED, false)
+            putLongArray(QueueCommands.ARG_UIDS, LongArray(0))
+        }
+        send(player, QueueCommands.ADOPT_ORDER, args)
+        player.shuffleModeEnabled = false
+        player.setMediaItems(items, index, 0L)
+        player.prepare()
+        player.play()
+    }
+
     /** Inserts a song right after the current one; starts playback when the queue was empty. */
     fun playNext(track: Track, artist: String) {
         val player = controller ?: return
@@ -242,9 +269,13 @@ class PlayerConnection(context: Context, private val listener: NowPlayingListene
         player.play()
     }
 
-    private fun toItem(track: Track, artist: String): MediaItem {
+    /** @param segment the part of the song to play in a mashup; null plays the whole song */
+    private fun toItem(track: Track, artist: String, segment: MixSegment? = null): MediaItem {
         val uid = nextUid++
-        val extras = Bundle().apply { putLong(QueueCommands.EXTRA_UID, uid) }
+        val extras = Bundle().apply {
+            putLong(QueueCommands.EXTRA_UID, uid)
+            if (segment != null) putLong(QueueCommands.EXTRA_CROSSFADE_MS, segment.crossfadeMs)
+        }
         val metadata = MediaMetadata.Builder()
             .setTitle(track.title)
             .setArtist(artist.ifEmpty { null })
@@ -252,10 +283,20 @@ class PlayerConnection(context: Context, private val listener: NowPlayingListene
             .setArtworkUri(Uri.parse(track.uri))
             .setExtras(extras)
             .build()
-        return MediaItem.Builder()
+        val builder = MediaItem.Builder()
             .setMediaId(track.uri)
             .setUri(track.uri)
             .setMediaMetadata(metadata)
+        if (segment != null) builder.setClippingConfiguration(clippingOf(segment))
+        return builder.build()
+    }
+
+    /** The player plays only this part of the song; positions are relative to its start. */
+    private fun clippingOf(segment: MixSegment): MediaItem.ClippingConfiguration {
+        val end = if (segment.playsToEnd) C.TIME_END_OF_SOURCE else segment.endMs
+        return MediaItem.ClippingConfiguration.Builder()
+            .setStartPositionMs(segment.startMs)
+            .setEndPositionMs(end)
             .build()
     }
 

@@ -25,6 +25,12 @@ internal object QueueCommands {
     /** Key of the per-slot id in a media item's metadata extras. */
     const val EXTRA_UID = "queue_uid"
 
+    /** Key of a mashup step's crossfade length, in milliseconds, in the metadata extras. */
+    const val EXTRA_CROSSFADE_MS = "mix_crossfade_ms"
+
+    /** The longest crossfade the player performs; the same limit as MixSegment.MAX_CROSSFADE_MS. */
+    const val MAX_CROSSFADE_MS = 15000L
+
     val SET_SHUFFLE = SessionCommand(ACTION_SET_SHUFFLE, Bundle.EMPTY)
     val ADOPT_ORDER = SessionCommand(ACTION_ADOPT_ORDER, Bundle.EMPTY)
     val GET_STATE = SessionCommand(ACTION_GET_STATE, Bundle.EMPTY)
@@ -32,5 +38,11 @@ internal object QueueCommands {
     /** The slot id of [item], or 0 when it has none. */
     fun uidOf(item: MediaItem): Long {
         return item.mediaMetadata.extras?.getLong(EXTRA_UID, 0L) ?: 0L
+    }
+
+    /** How long [item] blends into the next one; 0 for a normal song. */
+    fun crossfadeOf(item: MediaItem): Long {
+        val value = item.mediaMetadata.extras?.getLong(EXTRA_CROSSFADE_MS, 0L) ?: 0L
+        return value.coerceIn(0L, MAX_CROSSFADE_MS)
     }
 }
