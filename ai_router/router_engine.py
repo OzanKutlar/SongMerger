@@ -5,9 +5,11 @@ from typing import Any
 
 import numpy as np
 
-DEFAULT_CROSSFADE_MS = 6000
-MIN_SEGMENT_MS = 22000
-BEAM_WIDTH = 12
+DEFAULT_CROSSFADE_MS = 4000
+MIN_SEGMENT_MS = 32000
+SHORT_TRACK_MIN_SEGMENT_MS = 18000
+BEAM_WIDTH = 16
+MAX_TEMPO_DIFF = 0.085  # +/- 8.5% for beat-matched blends
 
 
 def format_mmss(ms: int) -> str:
@@ -26,35 +28,99 @@ def _cosine(a: list[float], b: list[float]) -> float:
     return float(np.clip(np.dot(va, vb) / denom, -1.0, 1.0))
 
 
-def score_transition(out_cue: dict[str, Any], in_cue: dict[str, Any]) -> float:
-    """Scores how seamlessly out_cue blends into in_cue in [0.0, 1.0]."""
-    harmonic = 0.55 * _cosine(out_cue["chroma"], in_cue["chroma"]) + 0.45 * _cosine(
-        out_cue["tonnetz"], in_cue["tonnetz"]
-    )
-    timbral = 0.65 * _cosine(out_cue["mfcc"], in_cue["mfcc"]) + 0.35 * _cosine(
-        out_cue["contrast"], in_cue["contrast"]
-    )
+def _side(cue: dict[str, Any], side: str) -> dict[str, Any]:
+    sub = cue.get(side)
+    return sub if isinstance(sub, dict) else cue
 
-    e_out = float(out_cue.get("energy", 0.0))
-    e_in = float(in_cue.get("energy", 0.0))
+
+def _best_rhythm_match(r_out: list[float], r_in: list[float]) -> float:
+    """Peak correlation across 4 beat-phase shifts (0, 1, 2, 3 beats = 0, 8, 16, 24 steps)."""
+    if not r_out or not r_in or len(r_out) != len(r_in):
+        return 0.5
+    va = np.asarray(r_out, dtype=np.float32)
+    vb = np.asarray(r_in, dtype=np.float32)
+    na = float(np.linalg.norm(va))
+    nb = float(np.linalg.norm(vb))
+    if na <= 1e-9 or nb <= 1e-9:
+        return 0.3
+    va = va / na
+    vb = vb / nb
+    step = max(1, len(vb) // 4)
+    best = max(float(np.dot(va, np.roll(vb, shift))) for shift in (0, step, step * 2, step * 3))
+    return float(np.clip(0.5 * (best + 1.0), 0.0, 1.0))
+
+
+def _harmonic_consonance(c_out: list[float], c_in: list[float], t_out: list[float], t_in: list[float]) -> float:
+    """Combines direct pitch-class match, fifths/relative-key match (+7/-5 semitones), and tonnetz."""
+    va = np.asarray(c_out, dtype=np.float32)
+    vb = np.asarray(c_in, dtype=np.float32)
+    direct = _cosine(c_out, c_in)
+    fifth_up = float(np.dot(va, np.roll(vb, 7))) if va.size == 12 and vb.size == 12 else direct
+    fifth_dn = float(np.dot(va, np.roll(vb, 5))) if va.size == 12 and vb.size == 12 else direct
+    chroma_best = max(direct, 0.92 * max(fifth_up, fifth_dn))
+    tonnetz_sim = 0.5 * (_cosine(t_out, t_in) + 1.0)
+    return float(np.clip(0.60 * chroma_best + 0.40 * tonnetz_sim, 0.0, 1.0))
+
+
+def _tempo_compatibility(bpm_a: float, bpm_b: float) -> tuple[float, float]:
+    """Returns (compatibility_score in [0, 1], playback_tempo_ratio for Track B)."""
+    if bpm_a <= 0.0 or bpm_b <= 0.0:
+        return 0.7, 1.0
+    best_rel = 1.0
+    best_ratio = 1.0
+    for mult in (1.0, 0.5, 2.0):
+        scaled_b = bpm_b * mult
+        rel = abs(bpm_a - scaled_b) / max(bpm_a, scaled_b, 60.0)
+        if rel < best_rel:
+            best_rel = rel
+            best_ratio = bpm_a / scaled_b
+    if best_rel <= MAX_TEMPO_DIFF:
+        score = math.exp(-12.0 * (best_rel ** 2))
+        return float(score), float(np.clip(best_ratio, 0.92, 1.08))
+    # Outside beat-matching range: heavily penalized unless energy is low
+    return float(max(0.05, math.exp(-6.0 * best_rel))), 1.0
+
+
+def score_transition(
+    out_cue: dict[str, Any],
+    in_cue: dict[str, Any],
+    bpm_a: float = 120.0,
+    bpm_b: float = 120.0,
+) -> float:
+    """Scores how seamlessly out_cue (outgoing window) blends into in_cue (incoming window)."""
+    out_w = _side(out_cue, "out")
+    in_w = _side(in_cue, "in")
+
+    harmonic = _harmonic_consonance(out_w["chroma"], in_w["chroma"], out_w["tonnetz"], in_w["tonnetz"])
+    mfcc_sim = 0.5 * (_cosine(out_w["mfcc"], in_w["mfcc"]) + 1.0)
+    contrast_sim = 0.5 * (_cosine(out_w["contrast"], in_w["contrast"]) + 1.0)
+    timbral = 0.65 * mfcc_sim + 0.35 * contrast_sim
+
+    rhythm_match = _best_rhythm_match(out_w.get("rhythm", []), in_w.get("rhythm", []))
+    tempo_score, _ = _tempo_compatibility(bpm_a, bpm_b)
+
+    e_out = float(out_w.get("energy", 0.0))
+    e_in = float(in_w.get("energy", 0.0))
     energy_diff = abs(e_out - e_in) / max(e_out, e_in, 1e-4)
     energy_score = math.exp(-2.2 * energy_diff)
 
-    c_out = float(out_cue.get("centroid_hz", 1500.0))
-    c_in = float(in_cue.get("centroid_hz", 1500.0))
+    c_out = float(out_w.get("centroid_hz", 1500.0))
+    c_in = float(in_w.get("centroid_hz", 1500.0))
     centroid_diff = abs(c_out - c_in) / max(c_out, c_in, 100.0)
-    centroid_score = math.exp(-1.5 * centroid_diff)
+    centroid_score = math.exp(-1.8 * centroid_diff)
 
-    t_out = float(out_cue.get("transient", 0.0))
-    t_in = float(in_cue.get("transient", 0.0))
-    transient_penalty = min(0.25, 0.03 * (t_out + t_in))
+    # Structural DJ flow bonus: prefer leaving in the second half and entering in the first half
+    pos_out = float(out_cue.get("pos_ratio", 0.6))
+    pos_in = float(in_cue.get("pos_ratio", 0.2))
+    flow_bonus = (0.06 if pos_out >= 0.45 else -0.04) + (0.06 if pos_in <= 0.45 else -0.03)
 
     raw = (
-        0.38 * max(0.0, harmonic)
-        + 0.32 * max(0.0, timbral)
-        + 0.18 * energy_score
-        + 0.12 * centroid_score
-        - transient_penalty
+        0.28 * harmonic
+        + 0.24 * timbral
+        + 0.22 * (rhythm_match * tempo_score)
+        + 0.16 * energy_score
+        + 0.10 * centroid_score
+        + flow_bonus
     )
     return float(np.clip(raw, 0.0, 1.0))
 
@@ -81,7 +147,7 @@ def _best_pair(
     return best
 
 
-EXPECTED_DIMS = {"chroma": 12, "tonnetz": 6, "mfcc": 13, "contrast": 7}
+EXPECTED_DIMS = {"chroma": 12, "tonnetz": 6, "contrast": 7}
 MAX_ROUTE_TRACKS = 150
 
 
@@ -93,6 +159,8 @@ def _is_usable(profile: dict[str, Any]) -> bool:
         for key, dims in EXPECTED_DIMS.items():
             if len(cue.get(key) or []) != dims:
                 return False
+        if len(cue.get("mfcc") or []) not in (12, 13):
+            return False
     return True
 
 
@@ -126,22 +194,16 @@ def _relative_diff(values: np.ndarray, floor: float) -> np.ndarray:
     return np.abs(values[:, None] - values[None, :]) / larger
 
 
-def _pair_scores(cues: list[dict[str, Any]]) -> np.ndarray:
-    """score_transition for every (out cue, in cue) pair at once."""
-    harmonic = 0.55 * _cos_matrix([c["chroma"] for c in cues]) + 0.45 * _cos_matrix([c["tonnetz"] for c in cues])
-    timbral = 0.65 * _cos_matrix([c["mfcc"] for c in cues]) + 0.35 * _cos_matrix([c["contrast"] for c in cues])
-    energy_score = np.exp(-2.2 * _relative_diff(_scalar(cues, "energy", 0.0), 1e-4))
-    centroid_score = np.exp(-1.5 * _relative_diff(_scalar(cues, "centroid_hz", 1500.0), 100.0))
-    transient = _scalar(cues, "transient", 0.0)
-    penalty = np.minimum(0.25, 0.03 * (transient[:, None] + transient[None, :]))
-    raw = (
-        0.38 * np.maximum(0.0, harmonic)
-        + 0.32 * np.maximum(0.0, timbral)
-        + 0.18 * energy_score
-        + 0.12 * centroid_score
-        - penalty
-    )
-    return np.clip(raw, 0.0, 1.0).astype(np.float32)
+def _pair_scores(cues: list[dict[str, Any]], cue_bpms: list[float]) -> np.ndarray:
+    """Computes score_transition for every (out_cue, in_cue) pair across all tracks."""
+    n = len(cues)
+    scores = np.zeros((n, n), dtype=np.float32)
+    for i in range(n):
+        ci = cues[i]
+        bpm_i = cue_bpms[i]
+        for j in range(n):
+            scores[i, j] = score_transition(ci, cues[j], bpm_i, cue_bpms[j])
+    return scores
 
 
 class CueTable:
@@ -149,13 +211,22 @@ class CueTable:
 
     def __init__(self, profiles: list[dict[str, Any]]) -> None:
         cues: list[dict[str, Any]] = []
+        cue_bpms: list[float] = []
         self.offsets: dict[str, tuple[int, int]] = {}
+        self.bpms: dict[str, float] = {}
+        self.durations: dict[str, int] = {}
         for profile in profiles:
+            tid = str(profile["track_id"])
+            bpm = float(profile.get("bpm", 120.0) or 120.0)
+            self.bpms[tid] = bpm
+            self.durations[tid] = int(profile.get("duration_ms", 0))
             start = len(cues)
-            cues.extend(profile.get("cues", []))
-            self.offsets[str(profile["track_id"])] = (start, len(cues))
+            track_cues = profile.get("cues", [])
+            cues.extend(track_cues)
+            cue_bpms.extend([bpm] * len(track_cues))
+            self.offsets[tid] = (start, len(cues))
         self.times = np.asarray([int(c["time_ms"]) for c in cues], dtype=np.int64)
-        self.scores = _pair_scores(cues) if cues else np.zeros((0, 0), dtype=np.float32)
+        self.scores = _pair_scores(cues, cue_bpms) if cues else np.zeros((0, 0), dtype=np.float32)
 
     def score_of(self, a_id: str, a_index: int, b_id: str, b_index: int) -> float:
         return float(self.scores[self.offsets[a_id][0] + a_index, self.offsets[b_id][0] + b_index])
@@ -174,8 +245,10 @@ class CueTable:
         b0, b1 = self.offsets[b_id]
         times_a = self.times[a0:a1]
         times_b = self.times[b0:b1]
-        ok_a = times_a >= min_a_start_ms + MIN_SEGMENT_MS
-        ok_b = (b_duration_ms - times_b) >= MIN_SEGMENT_MS // 2
+        a_dur = self.durations.get(a_id, 0)
+        min_seg = MIN_SEGMENT_MS if a_dur >= 75000 else SHORT_TRACK_MIN_SEGMENT_MS
+        ok_a = times_a >= min_a_start_ms + min_seg
+        ok_b = (b_duration_ms - times_b) >= max(12000, min_seg // 2)
         if not ok_a.any() or not ok_b.any():
             return None
         masked = np.where(ok_a[:, None] & ok_b[None, :], self.scores[a0:a1, b0:b1], -1.0)
@@ -243,9 +316,15 @@ def generate_mashup_playlists(
                     if pair is None:
                         continue
                     edge_score, out_cue, in_cue = pair
+                    bpm_a = table.bpms.get(cur_id, 120.0)
+                    bpm_b = table.bpms.get(cand_id, 120.0)
+                    _, tempo_ratio = _tempo_compatibility(bpm_a, bpm_b)
+                    eight_beat_ms = int(round(8.0 * (60000.0 / max(bpm_a, 60.0))))
+                    fade_ms = max(2500, min(5500, eight_beat_ms))
                     diversity_penalty = 0.25 if (cur_id, cand_id) in used_edges else 0.0
                     new_segs = [dict(s) for s in segs]
                     new_segs[-1]["end_ms"] = int(out_cue["time_ms"])
+                    new_segs[-1]["crossfade_ms"] = fade_ms
                     new_segs.append(
                         {
                             "track_id": cand_id,
@@ -253,6 +332,7 @@ def generate_mashup_playlists(
                             "start_ms": int(in_cue["time_ms"]),
                             "end_ms": int(cand["duration_ms"]),
                             "crossfade_ms": DEFAULT_CROSSFADE_MS,
+                            "tempo_ratio": round(float(tempo_ratio), 4),
                         }
                     )
                     next_beam.append(

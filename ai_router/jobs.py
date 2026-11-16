@@ -20,7 +20,7 @@ READ_CHUNK_BYTES = 65536
 MAX_JOBS_KEPT = 20
 MAX_JOB_TRACKS = 2000
 MAX_INBOX_FILES = 20000
-STALE_INBOX_SEC = 24 * 3600
+STALE_INBOX_SEC = 30 * 24 * 3600  # Keep uploaded audio for 30 days so re-analysis needs no re-upload
 ALLOWED_SUFFIXES = (".mp3", ".m4a", ".aac", ".flac", ".wav", ".ogg", ".opus", ".wma")
 
 
@@ -74,6 +74,13 @@ class UploadInbox:
             if tmp_path.exists():
                 tmp_path.unlink(missing_ok=True)
         return received
+
+    def has(self, track_id: str, fingerprint: str) -> bool:
+        """True when the uploaded audio for [track_id] is already stored with [fingerprint]."""
+        item = self.take(track_id)
+        if item is None:
+            return False
+        return str(item.meta.get("fingerprint", "")) == fingerprint
 
     def take(self, track_id: str) -> InboxItem | None:
         """The stored upload of [track_id], or None when there is none."""
@@ -269,8 +276,8 @@ class JobRunner:
             ok = True
         except Exception as exc:  # noqa: BLE001 - one bad song must not stop the job
             print(f"[ai_router] cannot analyse {title}: {exc}")
-        finally:
             self.inbox.discard(item)
+        finally:
             job.record(item.track_id, ok)
         status = job.snapshot()
         print(f"[ai_router] {status['done']}/{status['total']} {'ok  ' if ok else 'FAIL'} {title}")

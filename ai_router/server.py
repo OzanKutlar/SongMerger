@@ -97,11 +97,25 @@ def make_handler(ctx: RouterContext) -> type[BaseHTTPRequestHandler]:
                 self._send_json(HTTPStatus.BAD_REQUEST, {"error": "Invalid tracks payload"})
                 return
             missing: list[str] = []
+            reanalyze: list[str] = []
             for item in data["tracks"]:
                 tid = str(item.get("id", ""))
                 fp = str(item.get("fingerprint", ""))
-                if tid and not ctx.cache.has(tid, fp):
+                if not tid or ctx.cache.has(tid, fp):
+                    continue
+                if ctx.inbox.has(tid, fp):
+                    reanalyze.append(tid)
+                else:
                     missing.append(tid)
+            # If audio is already stored in inbox but profile version changed, re-analyse it now
+            if reanalyze and not missing:
+                job = ctx.runner.start(reanalyze)
+                for _ in range(SELF_TEST_POLLS):
+                    if job.is_finished():
+                        break
+                    time.sleep(0.25)
+            else:
+                missing.extend(reanalyze)
             self._send_json(HTTPStatus.OK, {"missing_ids": missing})
 
         def _handle_upload_track(self) -> None:
@@ -200,7 +214,12 @@ def run_self_test(device: str, workers: int, device_label: str) -> None:
         assert all(p is not None for p in profiles), "Expected every song in the cache"
         table = CueTable(profiles)
         first, second = profiles[0], profiles[1]
-        expected = score_transition(first["cues"][0], second["cues"][0])
+        expected = score_transition(
+            first["cues"][0],
+            second["cues"][0],
+            float(first.get("bpm", 120.0)),
+            float(second.get("bpm", 120.0)),
+        )
         actual = table.score_of(first["track_id"], 0, second["track_id"], 0)
         assert abs(expected - actual) < 1e-3, f"Score matrix mismatch: {expected} vs {actual}"
 
