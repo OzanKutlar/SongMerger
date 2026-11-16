@@ -20,6 +20,7 @@ import androidx.recyclerview.widget.RecyclerView
 import me.Integer.Mediaplayer.R
 import me.Integer.Mediaplayer.library.ArtistSorter
 import me.Integer.Mediaplayer.library.LibraryRepository
+import me.Integer.Mediaplayer.library.PlaylistImporter
 import me.Integer.Mediaplayer.library.Track
 import me.Integer.Mediaplayer.library.TrackSorter
 import me.Integer.Mediaplayer.ui.widgets.PressFeedback
@@ -95,6 +96,8 @@ class LibraryFragment : Fragment(R.layout.fragment_library), LibraryRepository.L
         if (query.isNotEmpty()) searchBar.visibility = View.VISIBLE
         refresh()
         onPlayerChanged()
+        PlaylistImporter.get(requireContext()).onAppResumed()
+        ImportPlaylistDialog.showStatusDialogIfActive(requireContext())
     }
 
     override fun onStop() {
@@ -209,11 +212,13 @@ class LibraryFragment : Fragment(R.layout.fragment_library), LibraryRepository.L
     private fun showOverflow(anchor: View) {
         val popup = PopupMenu(requireContext(), anchor)
         popup.menu.add(0, ID_QUEUE, 0, R.string.menu_current_queue)
-        popup.menu.add(0, ID_RESCAN, 1, R.string.library_rescan)
-        popup.menu.add(0, ID_SETTINGS, 2, R.string.library_settings)
+        popup.menu.add(0, ID_IMPORT, 1, R.string.library_import_playlist)
+        popup.menu.add(0, ID_RESCAN, 2, R.string.library_rescan)
+        popup.menu.add(0, ID_SETTINGS, 3, R.string.library_settings)
         popup.setOnMenuItemClickListener { item ->
             when (item.itemId) {
                 ID_QUEUE -> navigator.openQueue()
+                ID_IMPORT -> ImportPlaylistDialog.startFlow(requireContext(), repository, host)
                 ID_RESCAN -> repository.rescan()
                 ID_SETTINGS -> navigator.openSettings()
             }
@@ -503,6 +508,7 @@ class LibraryFragment : Fragment(R.layout.fragment_library), LibraryRepository.L
         const val ID_QUEUE = 1
         const val ID_RESCAN = 2
         const val ID_SETTINGS = 3
+        const val ID_IMPORT = 4
         const val TAB_SELECTED_SP = 28f
         const val TAB_IDLE_SP = 17f
         const val TAB_ANIMATION_MS = 220L

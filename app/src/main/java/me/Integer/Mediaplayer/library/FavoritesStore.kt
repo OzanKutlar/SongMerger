@@ -24,6 +24,17 @@ class FavoritesStore(context: Context) {
         return nowFavorite
     }
 
+    /** Adds all [trackUris] in a single write and returns how many new tracks were added. */
+    fun addAll(trackUris: Collection<String>): Int {
+        val valid = trackUris.filter { it.isNotEmpty() }
+        if (valid.isEmpty()) return 0
+        val current = stored()
+        val updated = current + valid
+        val added = updated.size - current.size
+        if (added > 0) save(updated)
+        return added
+    }
+
     fun all(): Set<String> {
         return stored()
     }

@@ -130,6 +130,13 @@ class LibraryRepository private constructor(appContext: Context) {
         return state
     }
 
+    /** Marks all [trackUris] as favorites and notifies listeners if any were added. */
+    fun addFavorites(trackUris: Collection<String>): Int {
+        val added = favorites.addAll(trackUris)
+        if (added > 0) notifyListenersChanged()
+        return added
+    }
+
     fun favoriteTracks(): List<Track> {
         val favUris = favorites.all()
         if (favUris.isEmpty()) return emptyList()

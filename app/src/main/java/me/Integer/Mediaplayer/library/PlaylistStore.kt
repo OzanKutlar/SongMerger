@@ -62,6 +62,24 @@ class PlaylistStore(context: Context, private val onChanged: () -> Unit) {
         return update(id) { it.copy(trackUris = it.trackUris + trackUri) }
     }
 
+    /** Appends [trackUris] not yet in the playlist in one write; returns how many were added. */
+    fun addTracks(id: Long, trackUris: List<String>): Int {
+        val playlist = get(id) ?: return 0
+        val existing = playlist.trackUris.toHashSet()
+        val room = (MAX_TRACKS - playlist.trackUris.size).coerceAtLeast(0)
+        if (room == 0) return 0
+        val additions = ArrayList<String>()
+        for (uri in trackUris) {
+            if (uri.isNotEmpty() && existing.add(uri)) {
+                additions.add(uri)
+                if (additions.size >= room) break
+            }
+        }
+        if (additions.isEmpty()) return 0
+        update(id) { it.copy(trackUris = it.trackUris + additions) }
+        return additions.size
+    }
+
     /** Removing the song whose cover the playlist uses puts the cover back on automatic. */
     fun removeTrack(id: Long, trackUri: String) {
         update(id) { old ->
