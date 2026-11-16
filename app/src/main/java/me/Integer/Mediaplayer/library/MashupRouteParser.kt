@@ -15,7 +15,13 @@ object MashupRouteParser {
     data class Hop(val title: String, val timeMs: Long)
 
     /** One step of the structured form; [trackId] is whatever the caller can look up. */
-    data class Step(val trackId: String, val startMs: Long, val endMs: Long, val crossfadeMs: Long)
+    data class Step(
+        val trackId: String,
+        val startMs: Long,
+        val endMs: Long,
+        val crossfadeMs: Long,
+        val tempoRatio: Float = 1f
+    )
 
     const val MAX_ROUTE_CHARS = 20000
     const val MAX_STEPS = 200
@@ -121,8 +127,14 @@ object MashupRouteParser {
             val last = index == steps.size - 1
             if (!last && step.endMs <= step.startMs) return null
             val endMs = if (last) MixSegment.END_OF_TRACK else step.endMs
-            val segment = MixSegment.create(track.uri, step.startMs, endMs, step.crossfadeMs, track.durationMs)
-                ?: return null
+            val segment = MixSegment.create(
+                trackUri = track.uri,
+                startMs = step.startMs,
+                endMs = endMs,
+                crossfadeMs = step.crossfadeMs,
+                durationMs = track.durationMs,
+                tempoRatio = step.tempoRatio
+            ) ?: return null
             segments.add(segment)
         }
         return segments

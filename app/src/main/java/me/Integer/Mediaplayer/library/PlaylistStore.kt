@@ -215,10 +215,11 @@ class PlaylistStore(context: Context, private val onChanged: () -> Unit) {
         for (i in 0 until count) {
             val item = array.optJSONObject(i) ?: continue
             val segment = MixSegment.create(
-                item.optString("u"),
-                item.optLong("s", 0L),
-                item.optLong("e", MixSegment.END_OF_TRACK),
-                item.optLong("x", MixSegment.DEFAULT_CROSSFADE_MS)
+                trackUri = item.optString("u"),
+                startMs = item.optLong("s", 0L),
+                endMs = item.optLong("e", MixSegment.END_OF_TRACK),
+                crossfadeMs = item.optLong("x", MixSegment.DEFAULT_CROSSFADE_MS),
+                tempoRatio = item.optDouble("t", 1.0).toFloat()
             )
             if (segment != null) segments.add(segment)
         }
@@ -234,6 +235,7 @@ class PlaylistStore(context: Context, private val onChanged: () -> Unit) {
                     .put("s", segment.startMs)
                     .put("e", segment.endMs)
                     .put("x", segment.crossfadeMs)
+                    .put("t", segment.tempoRatio.toDouble())
             )
         }
         return array

@@ -95,14 +95,15 @@ class MashupRouteParserTest {
     fun segmentsOfSteps_lastStepPlaysToEnd() {
         val ids = mapOf("a" to songA, "b" to songB)
         val steps = listOf(
-            MashupRouteParser.Step("a", 0L, 105_000L, 4000L),
-            MashupRouteParser.Step("b", 33_000L, 230_000L, 4000L)
+            MashupRouteParser.Step("a", 0L, 105_000L, 4000L, 1f),
+            MashupRouteParser.Step("b", 33_000L, 230_000L, 4000L, 1.04f)
         )
         val segments = MashupRouteParser.segmentsOfSteps(steps) { ids[it] }
         assertNotNull(segments)
         assertEquals(105_000L, segments!![0].endMs)
         assertEquals(MixSegment.END_OF_TRACK, segments[1].endMs)
         assertEquals(4000L, segments[1].crossfadeMs)
+        assertEquals(1.04f, segments[1].tempoRatio, 1e-4f)
     }
 
     @Test
@@ -125,8 +126,9 @@ class MashupRouteParserTest {
         assertNull(MixSegment.create(songA.uri, 0L, 500L, 6000L))
         assertNull(MixSegment.create("", 0L, 10_000L, 6000L))
         assertNull(MixSegment.create(songA.uri, -1L, 10_000L, 6000L))
-        val longFade = MixSegment.create(songA.uri, 0L, MixSegment.END_OF_TRACK, 60_000L)
+        val longFade = MixSegment.create(songA.uri, 0L, MixSegment.END_OF_TRACK, 60_000L, tempoRatio = 2.0f)
         assertEquals(MixSegment.MAX_CROSSFADE_MS, longFade!!.crossfadeMs)
+        assertEquals(MixSegment.MAX_TEMPO_RATIO, longFade.tempoRatio, 1e-4f)
     }
 
     @Test

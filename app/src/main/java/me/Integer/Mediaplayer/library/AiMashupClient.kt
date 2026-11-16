@@ -158,7 +158,8 @@ class AiMashupClient(context: Context, baseUrl: String) {
                     trackId = step.optString("track_id"),
                     startMs = step.optLong("start_ms", 0L),
                     endMs = step.optLong("end_ms", MixSegment.END_OF_TRACK),
-                    crossfadeMs = step.optLong("crossfade_ms", MixSegment.DEFAULT_CROSSFADE_MS)
+                    crossfadeMs = step.optLong("crossfade_ms", MixSegment.DEFAULT_CROSSFADE_MS),
+                    tempoRatio = step.optDouble("tempo_ratio", 1.0).toFloat()
                 )
             )
         }
