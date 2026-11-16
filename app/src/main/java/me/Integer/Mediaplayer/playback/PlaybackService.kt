@@ -1,13 +1,21 @@
 package me.Integer.Mediaplayer.playback
 
 import android.app.PendingIntent
+import android.content.Context
 import android.content.Intent
+import android.media.AudioAttributes as PlatformAudioAttributes
+import android.media.AudioFocusRequest
+import android.media.AudioManager
 import android.os.Bundle
 import android.util.Log
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
+import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import androidx.media3.extractor.DefaultExtractorsFactory
+import androidx.media3.extractor.mp3.Mp3Extractor
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
 import androidx.media3.session.SessionCommand
@@ -31,9 +39,41 @@ class PlaybackService : MediaSessionService() {
     private var session: MediaSession? = null
     private var player: ExoPlayer? = null
     private var artLoader: EmbeddedArtBitmapLoader? = null
+    private var audioManager: AudioManager? = null
+    private var focusRequest: AudioFocusRequest? = null
+    private var resumeOnFocusGain = false
 
-    /** Blends mashup steps into each other; idle for normal songs. */
+    /** Blends mashup steps into each other across two ping-pong decks; idle for normal songs. */
     private var crossfader: DjCrossfader? = null
+
+    private val focusListener = AudioManager.OnAudioFocusChangeListener { change ->
+        when (change) {
+            AudioManager.AUDIOFOCUS_GAIN -> {
+                crossfader?.setDucking(false)
+                if (resumeOnFocusGain) {
+                    resumeOnFocusGain = false
+                    player?.play()
+                }
+            }
+            AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> crossfader?.setDucking(true)
+            AudioManager.AUDIOFOCUS_LOSS_TRANSIENT -> {
+                resumeOnFocusGain = player?.playWhenReady == true
+                crossfader?.abort()
+                player?.pause()
+            }
+            AudioManager.AUDIOFOCUS_LOSS -> {
+                resumeOnFocusGain = false
+                crossfader?.abort()
+                player?.pause()
+            }
+        }
+    }
+
+    private val focusTriggerListener = object : Player.Listener {
+        override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
+            if (playWhenReady) requestAudioFocus() else if (!resumeOnFocusGain) abandonAudioFocus()
+        }
+    }
 
     private var shuffleOn = false
 
@@ -89,10 +129,17 @@ class PlaybackService : MediaSessionService() {
         super.onCreate()
         val loader = EmbeddedArtBitmapLoader(this)
         artLoader = loader
-        val exo = buildPlayer()
-        player = exo
-        crossfader = DjCrossfader(this, exo)
-        session = MediaSession.Builder(this, exo)
+        audioManager = getSystemService(Context.AUDIO_SERVICE) as? AudioManager
+        val deckA = buildPlayer()
+        val deckB = buildPlayer()
+        deckA.addListener(focusTriggerListener)
+        deckB.addListener(focusTriggerListener)
+        player = deckA
+        crossfader = DjCrossfader(deckA, deckB) { newActive ->
+            player = newActive
+            session?.player = newActive
+        }
+        session = MediaSession.Builder(this, deckA)
             .setCallback(sessionCallback)
             .setSessionActivity(openAppIntent())
             .setBitmapLoader(loader)
@@ -110,12 +157,10 @@ class PlaybackService : MediaSessionService() {
     }
 
     override fun onDestroy() {
+        abandonAudioFocus()
         crossfader?.release()
         crossfader = null
-        session?.let { current ->
-            current.player.release()
-            current.release()
-        }
+        session?.release()
         session = null
         player = null
         artLoader?.shutdown()
@@ -199,11 +244,38 @@ class PlaybackService : MediaSessionService() {
             .setUsage(C.USAGE_MEDIA)
             .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
             .build()
+        val extractors = DefaultExtractorsFactory()
+            .setConstantBitrateSeekingEnabled(true)
+            .setMp3ExtractorFlags(Mp3Extractor.FLAG_ENABLE_INDEX_SEEKING)
         return ExoPlayer.Builder(this)
-            .setAudioAttributes(attributes, true)
+            .setMediaSourceFactory(DefaultMediaSourceFactory(this, extractors))
+            .setAudioAttributes(attributes, false)
             .setHandleAudioBecomingNoisy(true)
             .setWakeMode(C.WAKE_MODE_LOCAL)
             .build()
+    }
+
+    private fun requestAudioFocus() {
+        val manager = audioManager ?: return
+        val req = focusRequest ?: AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
+            .setAudioAttributes(
+                PlatformAudioAttributes.Builder()
+                    .setUsage(PlatformAudioAttributes.USAGE_MEDIA)
+                    .setContentType(PlatformAudioAttributes.CONTENT_TYPE_MUSIC)
+                    .build()
+            )
+            .setOnAudioFocusChangeListener(focusListener)
+            .build()
+            .also { focusRequest = it }
+        if (manager.requestAudioFocus(req) != AudioManager.AUDIOFOCUS_REQUEST_GRANTED) {
+            crossfader?.abort()
+            player?.pause()
+        }
+    }
+
+    private fun abandonAudioFocus() {
+        val manager = audioManager ?: return
+        focusRequest?.let { manager.abandonAudioFocusRequest(it) }
     }
 
     /** Tapping the notification opens the app. */

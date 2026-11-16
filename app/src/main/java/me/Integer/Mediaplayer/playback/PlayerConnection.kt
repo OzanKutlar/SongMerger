@@ -291,7 +291,10 @@ class PlayerConnection(context: Context, private val listener: NowPlayingListene
         val uid = nextUid++
         val extras = Bundle().apply {
             putLong(QueueCommands.EXTRA_UID, uid)
-            if (segment != null) putLong(QueueCommands.EXTRA_CROSSFADE_MS, segment.crossfadeMs)
+            if (segment != null) {
+                putLong(QueueCommands.EXTRA_CROSSFADE_MS, segment.crossfadeMs)
+                putFloat(QueueCommands.EXTRA_TEMPO_RATIO, segment.tempoRatio)
+            }
         }
         val metadata = MediaMetadata.Builder()
             .setTitle(track.title)

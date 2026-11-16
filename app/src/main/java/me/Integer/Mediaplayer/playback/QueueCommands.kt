@@ -28,6 +28,9 @@ internal object QueueCommands {
     /** Key of a mashup step's crossfade length, in milliseconds, in the metadata extras. */
     const val EXTRA_CROSSFADE_MS = "mix_crossfade_ms"
 
+    /** Key of a mashup step's initial tempo ratio during a beat-matched blend. */
+    const val EXTRA_TEMPO_RATIO = "mix_tempo_ratio"
+
     /** The longest crossfade the player performs; the same limit as MixSegment.MAX_CROSSFADE_MS. */
     const val MAX_CROSSFADE_MS = 15000L
 
@@ -44,5 +47,11 @@ internal object QueueCommands {
     fun crossfadeOf(item: MediaItem): Long {
         val value = item.mediaMetadata.extras?.getLong(EXTRA_CROSSFADE_MS, 0L) ?: 0L
         return value.coerceIn(0L, MAX_CROSSFADE_MS)
+    }
+
+    /** Initial playback speed ratio for [item] at the start of its transition; 1f by default. */
+    fun tempoRatioOf(item: MediaItem): Float {
+        val value = item.mediaMetadata.extras?.getFloat(EXTRA_TEMPO_RATIO, 1f) ?: 1f
+        return if (value.isFinite()) value.coerceIn(0.85f, 1.15f) else 1f
     }
 }

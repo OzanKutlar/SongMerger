@@ -9,7 +9,8 @@ data class MixSegment(
     val trackUri: String,
     val startMs: Long,
     val endMs: Long,
-    val crossfadeMs: Long
+    val crossfadeMs: Long,
+    val tempoRatio: Float = 1f
 ) {
 
     val playsToEnd: Boolean
@@ -17,8 +18,10 @@ data class MixSegment(
 
     companion object {
         const val END_OF_TRACK = -1L
-        const val DEFAULT_CROSSFADE_MS = 6000L
+        const val DEFAULT_CROSSFADE_MS = 4000L
         const val MAX_CROSSFADE_MS = 15000L
+        const val MIN_TEMPO_RATIO = 0.85f
+        const val MAX_TEMPO_RATIO = 1.15f
 
         /** A step shorter than this is not worth playing. */
         const val MIN_LENGTH_MS = 1000L
@@ -36,14 +39,26 @@ data class MixSegment(
             startMs: Long,
             endMs: Long,
             crossfadeMs: Long,
-            durationMs: Long = 0L
+            durationMs: Long = 0L,
+            tempoRatio: Float = 1f
         ): MixSegment? {
             if (trackUri.isEmpty()) return null
             if (startMs < 0L || startMs > MAX_POSITION_MS) return null
             if (durationMs > 0L && startMs > durationMs - MIN_LENGTH_MS) return null
             val end = cleanEnd(endMs, durationMs)
             if (end != END_OF_TRACK && end - startMs < MIN_LENGTH_MS) return null
-            return MixSegment(trackUri, startMs, end, crossfadeMs.coerceIn(0L, MAX_CROSSFADE_MS))
+            val cleanTempo = if (tempoRatio.isFinite()) {
+                tempoRatio.coerceIn(MIN_TEMPO_RATIO, MAX_TEMPO_RATIO)
+            } else {
+                1f
+            }
+            return MixSegment(
+                trackUri = trackUri,
+                startMs = startMs,
+                endMs = end,
+                crossfadeMs = crossfadeMs.coerceIn(0L, MAX_CROSSFADE_MS),
+                tempoRatio = cleanTempo
+            )
         }
 
         private fun cleanEnd(endMs: Long, durationMs: Long): Long {

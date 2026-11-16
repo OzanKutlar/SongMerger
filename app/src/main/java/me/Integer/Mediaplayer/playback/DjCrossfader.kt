@@ -1,68 +1,64 @@
 package me.Integer.Mediaplayer.playback
 
-import android.content.Context
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
 import android.util.Log
-import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
+import androidx.media3.common.PlaybackParameters
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
 import kotlin.math.PI
 import kotlin.math.cos
-import kotlin.math.sin
+import kotlin.math.pow
 
 /**
- * DJ transitions for mashup queues. A queue item with a crossfade (see
- * [QueueCommands.crossfadeOf]) blends into the next item instead of cutting.
+ * Ping-pong dual-deck DJ mixer. Unlike a single-player handoff, a playing song never
+ * switches decks mid-stream:
  *
- * The [primary] player stays the only player the media session knows, so the notification,
- * lock screen and seekbar keep working. A second, outgoing deck plays the last seconds of
- * the step that is ending:
- *
- * 1. ARMED: shortly before the fade, the outgoing deck loads the same item, paused, at the
- *    fade position.
- * 2. HANDOFF: at the fade position the outgoing deck starts playing.
- * 3. FADING: the primary player mutes, moves to the next item and the two volumes follow
- *    an equal-power curve until the outgoing deck is silent.
- *
- * Pausing, seeking, skipping or changing the queue cancels the fade and restores the
- * volume. Main thread only, like the players.
+ * 1. ARMED: 3.5 s before the outgoing deck's fade point, the idle deck loads the queue at
+ *    the next track index, seeks to its clipped start with volume 0, and buffers to READY.
+ * 2. FADING: at the fade point, the incoming deck starts playing and becomes the active
+ *    session player. Its volume bleeds in rapidly while the outgoing deck finishes playing
+ *    its tail and fades down to 0.
+ * 3. FINISH: the outgoing deck stops and resets, while the incoming deck smoothly glides
+ *    its playback speed back to 1.0x if it was tempo-matched.
  */
-internal class DjCrossfader(context: Context, private val primary: ExoPlayer) {
+internal class DjCrossfader(
+    deckA: ExoPlayer,
+    deckB: ExoPlayer,
+    private val onActiveDeckChanged: (ExoPlayer) -> Unit
+) {
 
-    private enum class Stage { IDLE, ARMED, HANDOFF, FADING }
+    private enum class Stage { IDLE, ARMED, FADING }
 
     private val main = Handler(Looper.getMainLooper())
-    private val tail: ExoPlayer = buildTail(context.applicationContext)
+
+    var activeDeck: ExoPlayer = deckA
+        private set
+    private var idleDeck: ExoPlayer = deckB
 
     private var stage = Stage.IDLE
     private var released = false
     private var ticking = false
+    private var duckMultiplier = 1f
 
-    /** The queue slot that is fading out, and the one that entered at the handoff. */
     private var outgoingUid = 0L
     private var incomingUid = 0L
+    private var incomingIndex = -1
+    private var initialTempo = 1f
 
-    /** Position in the outgoing item where the fade begins, and how long it lasts. */
     private var fadeAtMs = 0L
     private var fadeLengthMs = 0L
-    private var handoffAt = 0L
     private var fadeStartedAt = 0L
-
-    /** Position jumps caused by this class are ignored until then. */
-    private var ignoreJumpsUntil = 0L
-
-    /** A slot whose transition was given up; it ends with a plain cut. */
     private var skippedUid = 0L
 
     private val tickTask = Runnable { onTick() }
     private val triggerTask = Runnable { trigger() }
 
-    private val primaryListener = object : Player.Listener {
+    private val activeListener = object : Player.Listener {
         override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
             if (!playWhenReady) abort()
         }
@@ -72,28 +68,22 @@ internal class DjCrossfader(context: Context, private val primary: ExoPlayer) {
             newPosition: Player.PositionInfo,
             reason: Int
         ) {
-            if (SystemClock.elapsedRealtime() <= ignoreJumpsUntil) return
             if (reason == Player.DISCONTINUITY_REASON_AUTO_TRANSITION && stage == Stage.IDLE) return
-            // A seek, skip or queue change by the user: cancel, and allow a new attempt.
             abort()
             skippedUid = 0L
         }
 
         override fun onEvents(player: Player, events: Player.Events) {
-            if (events.contains(Player.EVENT_MEDIA_ITEM_TRANSITION) && currentUid() != skippedUid) {
+            if (events.contains(Player.EVENT_MEDIA_ITEM_TRANSITION) && currentUid(activeDeck) != skippedUid) {
                 skippedUid = 0L
             }
             schedule()
         }
     }
 
-    private val tailListener = object : Player.Listener {
-        override fun onIsPlayingChanged(isPlaying: Boolean) {
-            if (isPlaying && stage == Stage.HANDOFF) switchPrimary()
-        }
-
+    private val idleListener = object : Player.Listener {
         override fun onPlayerError(error: PlaybackException) {
-            Log.w(TAG, "the outgoing deck failed: ${error.errorCodeName}")
+            Log.w(TAG, "secondary deck error (${stage.name}): ${error.errorCodeName}")
             val uid = outgoingUid
             abort()
             skippedUid = uid
@@ -101,19 +91,25 @@ internal class DjCrossfader(context: Context, private val primary: ExoPlayer) {
     }
 
     init {
-        primary.addListener(primaryListener)
-        tail.addListener(tailListener)
+        activeDeck.addListener(activeListener)
+        idleDeck.addListener(idleListener)
     }
 
-    // ------------------------------------------------------------------ public
+    fun setDucking(ducking: Boolean) {
+        duckMultiplier = if (ducking) DUCK_GAIN else 1f
+        if (stage == Stage.IDLE) {
+            activeDeck.volume = duckMultiplier
+        }
+    }
 
-    /** Cancels a pending or running transition and puts the volume back. */
+    /** Cancels any pending or running blend and restores the active deck to full volume. */
     fun abort() {
         main.removeCallbacks(triggerTask)
         if (stage == Stage.IDLE) return
         stage = Stage.IDLE
-        stopTail()
-        primary.volume = 1f
+        stopDeck(idleDeck)
+        activeDeck.volume = duckMultiplier
+        resetSpeed(activeDeck)
         schedule()
     }
 
@@ -124,17 +120,17 @@ internal class DjCrossfader(context: Context, private val primary: ExoPlayer) {
         main.removeCallbacks(tickTask)
         main.removeCallbacks(triggerTask)
         ticking = false
-        primary.removeListener(primaryListener)
-        tail.removeListener(tailListener)
-        tail.release()
+        activeDeck.removeListener(activeListener)
+        idleDeck.removeListener(idleListener)
+        activeDeck.release()
+        idleDeck.release()
     }
 
     // ------------------------------------------------------------------ ticking
 
-    /** Ticks only while a transition is running or the playing item has one coming. */
     private fun schedule() {
         if (released) return
-        val needed = stage != Stage.IDLE || (primary.isPlaying && plannedFadeMs() > 0L)
+        val needed = stage != Stage.IDLE || (activeDeck.isPlaying && plannedFadeMs() > 0L)
         if (!needed) {
             main.removeCallbacks(tickTask)
             ticking = false
@@ -142,8 +138,8 @@ internal class DjCrossfader(context: Context, private val primary: ExoPlayer) {
         }
         if (ticking) return
         ticking = true
-        val fast = stage == Stage.HANDOFF || stage == Stage.FADING
-        main.postDelayed(tickTask, if (fast) FADE_TICK_MS else WATCH_TICK_MS)
+        val delay = if (stage == Stage.FADING) FADE_TICK_MS else WATCH_TICK_MS
+        main.postDelayed(tickTask, delay)
     }
 
     private fun restartTicks() {
@@ -158,7 +154,6 @@ internal class DjCrossfader(context: Context, private val primary: ExoPlayer) {
         when (stage) {
             Stage.IDLE -> considerArming()
             Stage.ARMED -> watchArmed()
-            Stage.HANDOFF -> watchHandoff()
             Stage.FADING -> stepFade()
         }
         schedule()
@@ -166,61 +161,88 @@ internal class DjCrossfader(context: Context, private val primary: ExoPlayer) {
 
     // ------------------------------------------------------------------ arming
 
-    /** The fade length for the playing item, or 0 when it should end with a plain cut. */
+    private fun nextIndexOf(player: ExoPlayer): Int {
+        val count = player.mediaItemCount
+        if (count <= 1) return C.INDEX_UNSET
+        val current = player.currentMediaItemIndex
+        if (current + 1 < count) return current + 1
+        return if (player.repeatMode == Player.REPEAT_MODE_ALL) 0 else C.INDEX_UNSET
+    }
+
     private fun plannedFadeMs(): Long {
-        val item = primary.currentMediaItem ?: return 0L
+        val item = activeDeck.currentMediaItem ?: return 0L
         val uid = QueueCommands.uidOf(item)
         val crossfade = QueueCommands.crossfadeOf(item)
         if (uid == 0L || uid == skippedUid || crossfade < MIN_FADE_MS) return 0L
-        if (primary.repeatMode == Player.REPEAT_MODE_ONE || !primary.hasNextMediaItem()) return 0L
-        val duration = primary.duration
+        if (activeDeck.repeatMode == Player.REPEAT_MODE_ONE) return 0L
+        if (nextIndexOf(activeDeck) == C.INDEX_UNSET) return 0L
+        val duration = activeDeck.duration
         if (duration == C.TIME_UNSET || duration <= 0L) return 0L
         val fade = minOf(crossfade, duration / 2)
         return if (fade >= MIN_FADE_MS) fade else 0L
     }
 
     private fun considerArming() {
-        if (!primary.isPlaying) return
+        if (!activeDeck.isPlaying) return
         val fade = plannedFadeMs()
-        val item = primary.currentMediaItem
+        val item = activeDeck.currentMediaItem
         if (fade <= 0L || item == null) return
-        val fadeAt = primary.duration - fade
-        val untilFade = fadeAt - primary.currentPosition
+        val fadeAt = activeDeck.duration - fade
+        val untilFade = fadeAt - activeDeck.currentPosition
         if (untilFade <= 0L) {
-            // Already inside the fade window, for example after starting near the end.
             skippedUid = QueueCommands.uidOf(item)
             return
         }
         if (untilFade <= WARMUP_MS) arm(item, fadeAt, fade)
     }
 
-    private fun arm(item: MediaItem, fadeAt: Long, fade: Long) {
-        val uid = QueueCommands.uidOf(item)
+    private fun arm(outgoingItem: MediaItem, fadeAt: Long, fade: Long) {
+        val uid = QueueCommands.uidOf(outgoingItem)
+        val nextIdx = nextIndexOf(activeDeck)
+        if (nextIdx == C.INDEX_UNSET) return
+        val count = activeDeck.mediaItemCount
+        val queueCopy = List(count) { activeDeck.getMediaItemAt(it) }
+        val nextItem = queueCopy.getOrNull(nextIdx) ?: return
+        val tempo = QueueCommands.tempoRatioOf(nextItem)
         try {
-            tail.volume = 1f
-            tail.playWhenReady = false
-            tail.setMediaItem(item, fadeAt)
-            tail.prepare()
+            idleDeck.volume = 0f
+            idleDeck.playWhenReady = false
+            idleDeck.repeatMode = activeDeck.repeatMode
+            idleDeck.playbackParameters = PlaybackParameters(tempo, 1f)
+            idleDeck.setMediaItems(queueCopy, nextIdx, 0L)
+            idleDeck.prepare()
         } catch (e: RuntimeException) {
-            Log.w(TAG, "cannot prepare the outgoing deck: ${e.message}")
-            stopTail()
+            Log.w(TAG, "cannot prepare incoming deck: ${e.message}")
+            stopDeck(idleDeck)
             skippedUid = uid
             return
         }
         outgoingUid = uid
+        incomingUid = QueueCommands.uidOf(nextItem)
+        incomingIndex = nextIdx
+        initialTempo = tempo
         fadeAtMs = fadeAt
         fadeLengthMs = fade
         stage = Stage.ARMED
     }
 
     private fun watchArmed() {
-        if (!primary.playWhenReady || currentUid() != outgoingUid) {
+        if (!activeDeck.playWhenReady || currentUid(activeDeck) != outgoingUid) {
             abort()
             return
         }
-        val untilFade = fadeAtMs - primary.currentPosition
+        val nextIdx = nextIndexOf(activeDeck)
+        if (nextIdx != incomingIndex || nextIdx == C.INDEX_UNSET) {
+            abort()
+            return
+        }
+        val nextUid = QueueCommands.uidOf(activeDeck.getMediaItemAt(nextIdx))
+        if (nextUid != incomingUid) {
+            abort()
+            return
+        }
+        val untilFade = fadeAtMs - activeDeck.currentPosition
         if (untilFade > WARMUP_MS + REWIND_SLACK_MS) {
-            // Moved back: it arms again closer to the end.
             abort()
             return
         }
@@ -229,127 +251,129 @@ internal class DjCrossfader(context: Context, private val primary: ExoPlayer) {
         main.postDelayed(triggerTask, untilFade.coerceAtLeast(0L))
     }
 
-    // ------------------------------------------------------------------ handoff & fade
+    // ------------------------------------------------------------------ trigger & crossfade
 
     private fun trigger() {
         if (stage != Stage.ARMED) return
-        if (!primary.playWhenReady || currentUid() != outgoingUid || !primary.hasNextMediaItem()) {
+        if (!activeDeck.playWhenReady || currentUid(activeDeck) != outgoingUid) {
             abort()
             return
         }
-        val late = primary.currentPosition - fadeAtMs
-        if (late < -EARLY_SLACK_MS) return // the next tick posts the trigger again
-        if (late > LATE_SLACK_MS || tail.playbackState != Player.STATE_READY) {
+        val late = activeDeck.currentPosition - fadeAtMs
+        if (late < -EARLY_SLACK_MS) return
+        if (idleDeck.playbackState == Player.STATE_BUFFERING && late <= BUFFER_GRACE_MS) {
+            main.postDelayed(triggerTask, FADE_TICK_MS)
+            return
+        }
+        if (late > LATE_SLACK_MS || idleDeck.playbackState != Player.STATE_READY) {
             val uid = outgoingUid
             abort()
             skippedUid = uid
             return
         }
-        stage = Stage.HANDOFF
-        handoffAt = SystemClock.elapsedRealtime()
-        tail.play()
-        restartTicks()
-    }
 
-    /** Moves on even if the outgoing deck never reports playing, so playback cannot stall. */
-    private fun watchHandoff() {
-        if (!primary.playWhenReady || currentUid() != outgoingUid) {
-            abort()
-            return
-        }
-        if (SystemClock.elapsedRealtime() - handoffAt >= HANDOFF_TIMEOUT_MS) switchPrimary()
-    }
+        // Swap decks: incoming deck starts playing Song B and becomes the session player;
+        // outgoing deck stays on Song A and plays out its fade tail without any seek or bump.
+        activeDeck.removeListener(activeListener)
+        idleDeck.removeListener(idleListener)
 
-    /** The outgoing deck carries the old step; the muted primary player enters the next one. */
-    private fun switchPrimary() {
-        if (stage != Stage.HANDOFF) return
-        if (!primary.hasNextMediaItem()) {
-            abort()
-            return
-        }
-        primary.volume = 0f
-        ignoreJumpsUntil = SystemClock.elapsedRealtime() + IGNORE_JUMPS_MS
-        try {
-            primary.seekToNextMediaItem()
-        } catch (e: RuntimeException) {
-            Log.w(TAG, "cannot move to the next step: ${e.message}")
-            abort()
-            return
-        }
-        incomingUid = currentUid()
-        fadeStartedAt = SystemClock.elapsedRealtime()
+        val outgoing = activeDeck
+        val incoming = idleDeck
+        activeDeck = incoming
+        idleDeck = outgoing
+
+        activeDeck.addListener(activeListener)
+        idleDeck.addListener(idleListener)
+
         stage = Stage.FADING
+        fadeStartedAt = SystemClock.elapsedRealtime()
         applyGains(0f)
+        activeDeck.play()
+        onActiveDeckChanged(activeDeck)
         restartTicks()
     }
 
     private fun stepFade() {
-        if (currentUid() != incomingUid) {
+        if (!activeDeck.playWhenReady || currentUid(activeDeck) != incomingUid) {
             abort()
             return
         }
         val elapsed = SystemClock.elapsedRealtime() - fadeStartedAt
         val progress = (elapsed.toFloat() / fadeLengthMs.toFloat()).coerceIn(0f, 1f)
-        val tailState = tail.playbackState
-        val tailDone = tailState == Player.STATE_ENDED || tailState == Player.STATE_IDLE
-        if (progress >= 1f || tailDone) {
+        val outState = idleDeck.playbackState
+        val outDone = outState == Player.STATE_ENDED || outState == Player.STATE_IDLE
+        if (progress >= 1f || outDone) {
             finish()
             return
         }
         applyGains(progress)
+        applyTempoGlide(progress)
     }
 
     private fun finish() {
         stage = Stage.IDLE
-        stopTail()
-        primary.volume = 1f
+        stopDeck(idleDeck)
+        activeDeck.volume = duckMultiplier
+        resetSpeed(activeDeck)
     }
 
-    /** Equal power: the combined loudness stays level through the blend. */
+    /**
+     * Fast bleed-in DJ curve:
+     * - Incoming rises with t^0.55 so its beat is clearly audible within the first second.
+     * - Outgoing holds 1.0 for the first 15% of the overlap, then cosine-fades to 0.
+     */
     private fun applyGains(progress: Float) {
-        val angle = progress * HALF_PI
-        primary.volume = sin(angle)
-        tail.volume = cos(angle)
+        val inGain = progress.pow(INCOMING_CURVE_EXP).coerceIn(0f, 1f)
+        val outPhase = ((progress - OUTGOING_HOLD) / (1f - OUTGOING_HOLD)).coerceIn(0f, 1f)
+        val outGain = cos(outPhase * HALF_PI).coerceIn(0f, 1f)
+        activeDeck.volume = inGain * duckMultiplier
+        idleDeck.volume = outGain * duckMultiplier
     }
 
-    private fun stopTail() {
-        try {
-            tail.stop()
-            tail.clearMediaItems()
-        } catch (e: RuntimeException) {
-            Log.w(TAG, "cannot stop the outgoing deck: ${e.message}")
+    /** Glides the incoming track's tempo back to 1.0x during the second half of the blend. */
+    private fun applyTempoGlide(progress: Float) {
+        if (initialTempo == 1f) return
+        val t = ((progress - 0.5f) / 0.5f).coerceIn(0f, 1f)
+        val speed = initialTempo + (1f - initialTempo) * t
+        activeDeck.playbackParameters = PlaybackParameters(speed, 1f)
+    }
+
+    private fun resetSpeed(player: ExoPlayer) {
+        if (player.playbackParameters.speed != 1f) {
+            player.playbackParameters = PlaybackParameters.DEFAULT
         }
     }
 
-    private fun currentUid(): Long {
-        return primary.currentMediaItem?.let { QueueCommands.uidOf(it) } ?: 0L
+    private fun stopDeck(deck: ExoPlayer) {
+        try {
+            deck.volume = 0f
+            deck.stop()
+            deck.clearMediaItems()
+            resetSpeed(deck)
+        } catch (e: RuntimeException) {
+            Log.w(TAG, "cannot stop deck: ${e.message}")
+        }
+    }
+
+    private fun currentUid(player: ExoPlayer): Long {
+        return player.currentMediaItem?.let { QueueCommands.uidOf(it) } ?: 0L
     }
 
     private companion object {
         const val TAG = "DjCrossfader"
-        const val WATCH_TICK_MS = 200L
-        const val FADE_TICK_MS = 30L
+        const val WATCH_TICK_MS = 160L
+        const val FADE_TICK_MS = 25L
 
-        /** How long before the fade the outgoing deck is loaded. */
-        const val WARMUP_MS = 3000L
+        const val WARMUP_MS = 3500L
         const val REWIND_SLACK_MS = 1500L
-        const val EARLY_SLACK_MS = 40L
-        const val LATE_SLACK_MS = 400L
-        const val HANDOFF_TIMEOUT_MS = 300L
-        const val IGNORE_JUMPS_MS = 800L
+        const val EARLY_SLACK_MS = 35L
+        const val BUFFER_GRACE_MS = 350L
+        const val LATE_SLACK_MS = 600L
         const val MIN_FADE_MS = 1000L
-        val HALF_PI = (PI / 2.0).toFloat()
 
-        /** The primary player owns audio focus; the outgoing deck only plays while it does. */
-        fun buildTail(context: Context): ExoPlayer {
-            val attributes = AudioAttributes.Builder()
-                .setUsage(C.USAGE_MEDIA)
-                .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
-                .build()
-            return ExoPlayer.Builder(context)
-                .setAudioAttributes(attributes, false)
-                .setHandleAudioBecomingNoisy(false)
-                .build()
-        }
+        const val INCOMING_CURVE_EXP = 0.55f
+        const val OUTGOING_HOLD = 0.15f
+        const val DUCK_GAIN = 0.2f
+        val HALF_PI = (PI / 2.0).toFloat()
     }
 }
