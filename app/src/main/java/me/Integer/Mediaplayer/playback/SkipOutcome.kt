@@ -12,6 +12,7 @@ object SkipOutcome {
 
     /** One record turn per 30 s of rewound playback, as with scrubbing. */
     const val DEGREES_PER_MS = 360f / 30000f
+    const val MIN_SEEK_DEGREES = 180f
     const val MIN_REWIND_DEGREES = 360f
     const val MAX_REWIND_DEGREES = 1080f
 
@@ -24,5 +25,12 @@ object SkipOutcome {
     fun rewindDegrees(rewoundMs: Long): Float {
         val raw = maxOf(0L, rewoundMs) * DEGREES_PER_MS
         return -raw.coerceIn(MIN_REWIND_DEGREES, MAX_REWIND_DEGREES)
+    }
+
+    /** Signed lerp spin (positive = clockwise/forward, negative = counter-clockwise/back) for a seek. */
+    fun seekDegrees(deltaMs: Long): Float {
+        if (deltaMs == 0L) return 0f
+        val magnitude = (kotlin.math.abs(deltaMs) * DEGREES_PER_MS).coerceIn(MIN_SEEK_DEGREES, MAX_REWIND_DEGREES)
+        return if (deltaMs > 0L) magnitude else -magnitude
     }
 }

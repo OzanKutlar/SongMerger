@@ -82,6 +82,10 @@ class NowPlayingController(
     private val transition = TrackTransition(textBlock, density)
 
     private var dragging = false
+    private var dragStartMs = 0L
+    private var dragLastMs = 0L
+    private var lastPositionMs = NO_VALUE
+    private var lastPositionUri = ""
     private var pendingSeekMs = -1L
     private var pendingSeekAt = 0L
     private var shownElapsedSecond = NO_VALUE
@@ -145,7 +149,10 @@ class NowPlayingController(
         }
 
         override fun onStartTrackingTouch(bar: SeekBar?) {
+            val startMs = displayedPosition(state, SystemClock.elapsedRealtime())
             dragging = true
+            dragStartMs = startMs
+            dragLastMs = startMs
             cancelGlide()
             setSeekHighlight(true)
         }
@@ -153,7 +160,12 @@ class NowPlayingController(
         override fun onStopTrackingTouch(bar: SeekBar?) {
             dragging = false
             setSeekHighlight(false)
-            commitSeekMs(PlaybackClock.fromPermille(seekBar.progress, state.durationMs))
+            val targetMs = PlaybackClock.fromPermille(seekBar.progress, state.durationMs)
+            val totalDeltaMs = targetMs - dragStartMs
+            if (abs(totalDeltaMs) >= TAP_SEEK_MIN_MS && abs(vinyl.pendingSpinDegrees) < SkipOutcome.MIN_SEEK_DEGREES) {
+                vinyl.rewind(SkipOutcome.seekDegrees(totalDeltaMs))
+            }
+            commitSeekMs(targetMs)
         }
     }
 
@@ -423,7 +435,13 @@ class NowPlayingController(
     // ------------------------------------------------------------------ seeking
 
     private fun previewSeek(progress: Int) {
-        elapsedView.text = PlaybackClock.format(PlaybackClock.fromPermille(progress, state.durationMs))
+        val targetMs = PlaybackClock.fromPermille(progress, state.durationMs)
+        val deltaMs = targetMs - dragLastMs
+        dragLastMs = targetMs
+        if (deltaMs != 0L) {
+            vinyl.spinBy(ScrubMath.msToDegrees(deltaMs))
+        }
+        elapsedView.text = PlaybackClock.format(targetMs)
         shownElapsedSecond = NO_VALUE
     }
 
@@ -436,6 +454,8 @@ class NowPlayingController(
         val current = state
         if (!current.active || !current.canSeek) return false
         val target = PlaybackClock.clamp(targetMs, current.durationMs)
+        lastPositionUri = current.trackUri
+        lastPositionMs = target
         pendingSeekMs = target
         pendingSeekAt = SystemClock.elapsedRealtime()
         host.connection.seekTo(target)
@@ -670,6 +690,14 @@ class NowPlayingController(
         }
         if (dragging || scrubbing) return
         val position = displayedPosition(current, now)
+        if (current.trackUri == lastPositionUri && lastPositionMs != NO_VALUE && pendingSeekMs < 0L) {
+            val jumpMs = position - lastPositionMs
+            if (abs(jumpMs) >= EXTERNAL_JUMP_MIN_MS) {
+                vinyl.spinBy(SkipOutcome.seekDegrees(jumpMs))
+            }
+        }
+        lastPositionUri = current.trackUri
+        lastPositionMs = position
         val progress = PlaybackClock.toPermille(position, duration)
         val gliding = progressGlide?.isRunning == true
         if (!gliding && seekBar.progress != progress) seekBar.progress = progress
@@ -787,6 +815,8 @@ class NowPlayingController(
         const val PROGRESS_GLIDE_MS = 300L
         const val SCRUB_SEEK_INTERVAL_MS = 250L
         const val SCRUB_MIN_SEEK_STEP_MS = 250L
+        const val TAP_SEEK_MIN_MS = 1000L
+        const val EXTERNAL_JUMP_MIN_MS = 2500L
 
         /** A light haptic tick every this much playback time while scrubbing. */
         const val SCRUB_DETENT_MS = 5000L

@@ -205,6 +205,29 @@ class VinylDiscView @JvmOverloads constructor(
         scheduleFrame()
     }
 
+    /**
+     * Adds [degrees] (positive = clockwise/forward, negative = counter-clockwise/rewind)
+     * to the record's lerp spin so slider drags and fast-forwards spin with momentum.
+     */
+    fun spinBy(degrees: Float) {
+        if (scrubActive || degrees == 0f || !degrees.isFinite()) return
+        velocity = 0f
+        if (Motion.durationScale(context) <= 0f) {
+            angle = (angle + degrees) % 360f
+            cancelRewind()
+            invalidate()
+            return
+        }
+        rewindRemaining = (rewindRemaining + degrees).coerceIn(-MAX_SPIN_DEGREES, MAX_SPIN_DEGREES)
+        rewindActive = true
+        invalidate()
+        scheduleFrame()
+    }
+
+    /** Remaining degrees in the current lerp spin. */
+    val pendingSpinDegrees: Float
+        get() = if (rewindActive) rewindRemaining else 0f
+
     /** True while a [rewind] is still turning the record. */
     val isRewinding: Boolean
         get() = rewindActive
@@ -687,6 +710,7 @@ class VinylDiscView @JvmOverloads constructor(
         const val SPRING_NANOS = 320000000L
         const val REWIND_RATE = 5f // 1/s, share of the remaining turn per second
         const val REWIND_DONE_DEGREES = 0.5f
+        const val MAX_SPIN_DEGREES = 1080f
         const val SLIDE_FADE = 0.7f
         const val RESTING_SCALE = 0.84f // size while paused
         const val SCALE_RATE = 9f // 1/s, share of the remaining size change per second
