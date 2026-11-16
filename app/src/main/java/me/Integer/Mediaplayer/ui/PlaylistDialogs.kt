@@ -98,7 +98,11 @@ object PlaylistDialogs {
         popup.menu.add(0, ID_DELETE, 3, R.string.playlist_delete)
         popup.setOnMenuItemClickListener { item ->
             when (item.itemId) {
-                ID_PLAY -> host.playAll(repository.resolveTracks(playlist.trackUris), false)
+                ID_PLAY -> if (playlist.isMix) {
+                    host.playMix(playlist.segments, 0)
+                } else {
+                    host.playAll(repository.resolveTracks(playlist.trackUris), false)
+                }
                 ID_SHUFFLE -> host.playAll(repository.resolveTracks(playlist.trackUris), true)
                 ID_RENAME -> rename(context, repository, playlist)
                 ID_DELETE -> confirmDelete(context, repository, playlist)

@@ -14,6 +14,7 @@ import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import me.Integer.Mediaplayer.R
 import me.Integer.Mediaplayer.library.LibraryRepository
+import me.Integer.Mediaplayer.library.MixSegment
 import me.Integer.Mediaplayer.library.Playlist
 import me.Integer.Mediaplayer.library.Track
 import me.Integer.Mediaplayer.ui.widgets.PressFeedback
@@ -41,6 +42,12 @@ class PlaylistFragment : Fragment(R.layout.fragment_playlist), LibraryRepository
     private var tracks: List<Track> = emptyList()
     private var dragging = false
     private var dragMoved = false
+
+    /** The steps of a mashup playlist; empty for a plain one. */
+    private var mix: List<MixSegment> = emptyList()
+
+    /** Per song, the parts of it the mashup plays, such as 0:33 to 2:45. */
+    private var cueText: Map<String, String> = emptyMap()
 
     private val playlistId: Long
         get() = arguments?.getLong(ARG_ID) ?: 0L
@@ -105,14 +112,16 @@ class PlaylistFragment : Fragment(R.layout.fragment_playlist), LibraryRepository
         view.findViewById<View>(R.id.playlistBack).setOnClickListener { navigator.goBack() }
         view.findViewById<View>(R.id.playlistMore).setOnClickListener { showMoreMenu(it) }
         shuffleButton.setOnClickListener { host.playAll(tracks, true) }
-        playButton.setOnClickListener { host.playAll(tracks, false) }
+        playButton.setOnClickListener {
+            if (mix.isEmpty()) host.playAll(tracks, false) else host.playMix(mix, 0)
+        }
     }
 
     private fun createList() {
         adapter = TrackAdapter(
             thumbnails = ThumbnailLoader.get(requireContext()),
-            artistLine = { track -> repository.displayArtist(track).ifEmpty { getString(R.string.library_unknown_artist) } },
-            onClick = { index -> host.playTracks(tracks, index) },
+            artistLine = { track -> artistLineOf(track) },
+            onClick = { index -> playRow(index) },
             onPlayNext = { track -> TrackMenu.playNext(requireContext(), track, host, repository) },
             onMenu = { track, anchor -> showTrackMenu(track, anchor) }
         )
@@ -127,9 +136,12 @@ class PlaylistFragment : Fragment(R.layout.fragment_playlist), LibraryRepository
         if (dragging) return
         val playlist = repository.playlists.get(playlistId)
         tracks = if (playlist == null) emptyList() else repository.resolveTracks(playlist.trackUris)
+        mix = playlist?.segments.orEmpty()
+        cueText = cuesOf(mix)
         adapter.submit(tracks)
         nameView.text = playlist?.name.orEmpty()
-        countView.text = resources.getQuantityString(R.plurals.library_song_count, tracks.size, tracks.size)
+        val songCount = resources.getQuantityString(R.plurals.library_song_count, tracks.size, tracks.size)
+        countView.text = if (mix.isEmpty()) songCount else getString(R.string.playlist_mix_count, songCount, mix.size)
         emptyView.visibility = if (tracks.isEmpty()) View.VISIBLE else View.GONE
         covers.bind(coverView, playlist)
         val usable = tracks.isNotEmpty()
@@ -137,6 +149,35 @@ class PlaylistFragment : Fragment(R.layout.fragment_playlist), LibraryRepository
         playButton.isEnabled = usable
         shuffleButton.alpha = if (usable) 1f else DISABLED_ALPHA
         playButton.alpha = if (usable) 1f else DISABLED_ALPHA
+    }
+
+    /** A plain playlist plays from the tapped song; a mashup from that song's first step. */
+    private fun playRow(index: Int) {
+        val track = tracks.getOrNull(index) ?: return
+        if (mix.isEmpty()) {
+            host.playTracks(tracks, index)
+            return
+        }
+        val step = mix.indexOfFirst { it.trackUri == track.uri }
+        host.playMix(mix, step.coerceAtLeast(0))
+    }
+
+    private fun artistLineOf(track: Track): String {
+        val artist = repository.displayArtist(track).ifEmpty { getString(R.string.library_unknown_artist) }
+        val cues = cueText[track.uri] ?: return artist
+        return getString(R.string.playlist_mix_cues, artist, cues)
+    }
+
+    private fun cuesOf(steps: List<MixSegment>): Map<String, String> {
+        if (steps.isEmpty()) return emptyMap()
+        val parts = LinkedHashMap<String, MutableList<String>>()
+        for (step in steps.take(MAX_CUE_STEPS)) {
+            val endMs = if (step.playsToEnd) repository.findTrack(step.trackUri)?.durationMs ?: 0L else step.endMs
+            val end = if (endMs > 0L) MixSegment.formatTime(endMs) else getString(R.string.playlist_mix_end)
+            val cue = "${MixSegment.formatTime(step.startMs)} \u2192 $end"
+            parts.getOrPut(step.trackUri) { ArrayList() }.add(cue)
+        }
+        return parts.mapValues { it.value.joinToString(", ") }
     }
 
     // ------------------------------------------------------------------ menus
@@ -147,11 +188,13 @@ class PlaylistFragment : Fragment(R.layout.fragment_playlist), LibraryRepository
         popup.menu.add(0, ID_RENAME, 0, R.string.playlist_rename)
         popup.menu.add(0, ID_COVER, 1, R.string.playlist_change_cover)
         popup.menu.add(0, ID_DELETE, 2, R.string.playlist_delete)
+        popup.menu.add(0, ID_MASHUP, 3, R.string.mashup_from_playlist)
         popup.setOnMenuItemClickListener { item ->
             when (item.itemId) {
                 ID_RENAME -> PlaylistDialogs.rename(requireContext(), repository, playlist)
                 ID_COVER -> changeCover()
                 ID_DELETE -> PlaylistDialogs.confirmDelete(requireContext(), repository, playlist) { navigator.goBack() }
+                ID_MASHUP -> AiMashupDialog.startFrom(requireContext(), repository, host, tracks)
             }
             true
         }
@@ -230,6 +273,11 @@ class PlaylistFragment : Fragment(R.layout.fragment_playlist), LibraryRepository
                 return true
             }
 
+            /** A mashup keeps the order its transitions were chosen for. */
+            override fun getDragDirs(recyclerView: RecyclerView, viewHolder: RecyclerView.ViewHolder): Int {
+                return if (mix.isEmpty()) super.getDragDirs(recyclerView, viewHolder) else 0
+            }
+
             override fun onSwiped(viewHolder: RecyclerView.ViewHolder, direction: Int) = Unit
 
             override fun clearView(recyclerView: RecyclerView, viewHolder: RecyclerView.ViewHolder) {
@@ -261,6 +309,8 @@ class PlaylistFragment : Fragment(R.layout.fragment_playlist), LibraryRepository
         private const val ID_USE_COVER = 6
         private const val ID_REMOVE = 7
         private const val ID_DETAILS = 8
+        private const val ID_MASHUP = 9
+        private const val MAX_CUE_STEPS = 500
 
         fun create(playlistId: Long): PlaylistFragment {
             return PlaylistFragment().apply {

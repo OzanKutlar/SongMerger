@@ -9,6 +9,7 @@
     <string name="library_settings">Settings</string>
     <string name="library_rescan">Rescan library</string>
     <string name="library_import_playlist">Import playlist</string>
+    <string name="library_ai_mashup">Generate AI mashups</string>
     <string name="library_tab_songs">Tracks</string>
     <string name="library_tab_favorites">Favorites</string>
     <string name="library_tab_artists">Artists</string>
@@ -103,6 +104,9 @@
     <string name="playlist_no_songs">This playlist has no songs yet</string>
     <string name="playlist_empty">This playlist is empty. Use &#8942; &#8594; Add to playlist on any song.</string>
     <string name="playlist_hint">Tap the cover to change it. Hold a song to reorder.</string>
+    <string name="playlist_mix_count">%1$s &#183; AI mashup with %2$d steps</string>
+    <string name="playlist_mix_cues">%1$s  &#183;  %2$s</string>
+    <string name="playlist_mix_end">end</string>
 
     <!-- Import Playlist -->
     <string name="import_playlist_title">Import playlist</string>
@@ -117,6 +121,48 @@
     <string name="import_save_now">Save now</string>
     <string name="import_complete_title">Import complete</string>
     <string name="import_complete_body">Matched %1$d of %2$d songs into %3$s.</string>
+
+    <!-- AI mashups -->
+    <string name="mashup_title">AI mashups</string>
+    <string name="mashup_from_playlist">Make AI mashups</string>
+    <string name="mashup_source_title">Make mashups from</string>
+    <string name="mashup_source_all">All tracks</string>
+    <string name="mashup_source_favorites">Favorites</string>
+    <string name="mashup_server_title">Mashup server address</string>
+    <string name="mashup_server_hint">192.168.1.50:8765</string>
+    <string name="mashup_server_invalid">Enter an address such as 192.168.1.50:8765</string>
+    <string name="mashup_connecting">Connecting to the server&#8230;</string>
+    <string name="mashup_analysing">Analysing songs (%1$d / %2$d)</string>
+    <string name="mashup_analysing_now">Now sending: %1$s</string>
+    <string name="mashup_routing">Finding the smoothest transitions&#8230;</string>
+    <string name="mashup_routing_body">This can take a minute or two for a large selection.</string>
+    <plurals name="mashup_skipped">
+        <item quantity="one">%1$d song could not be analysed and was left out.</item>
+        <item quantity="other">%1$d songs could not be analysed and were left out.</item>
+    </plurals>
+    <plurals name="mashup_ready">
+        <item quantity="one">%1$d mashup ready</item>
+        <item quantity="other">%1$d mashups ready</item>
+    </plurals>
+    <string name="mashup_ready_body">Tap a mashup to play it or save it as a playlist.</string>
+    <string name="mashup_score">%1$s  &#183;  %2$d%% match</string>
+    <string name="mashup_failed">Could not make mashups</string>
+    <string name="mashup_failed_no_server">Set the address of the computer running ai_router/server.py first.</string>
+    <string name="mashup_failed_too_few">At least two songs longer than 20 seconds are needed.</string>
+    <string name="mashup_failed_server">The server did not answer as expected: %1$s</string>
+    <string name="mashup_failed_no_routes">The server found no smooth transitions between these songs.</string>
+    <string name="mashup_hide">Hide</string>
+    <string name="mashup_close">Close</string>
+    <string name="mashup_save_all">Save all</string>
+    <string name="mashup_set_server">Set address</string>
+    <string name="mashup_play_now">Play now</string>
+    <string name="mashup_save">Save as playlist</string>
+    <string name="mashup_saved_one">Saved as %1$s</string>
+    <plurals name="mashup_saved">
+        <item quantity="one">Saved %1$d mashup playlist</item>
+        <item quantity="other">Saved %1$d mashup playlists</item>
+    </plurals>
+    <string name="mashup_save_failed">Could not save the mashup</string>
 
     <!-- Queue -->
     <string name="queue_title">Current queue</string>
@@ -153,6 +199,16 @@
     <string name="settings_separator_help">The text that separates artists inside one tag. Songs are listed under each of their artists.</string>
     <string name="settings_apply">Apply</string>
     <string name="settings_saved">Separator saved</string>
+    <string name="settings_ai_title">AI MASHUP SERVER</string>
+    <string name="settings_ai_help">The address of the computer running ai_router/server.py, for example http://192.168.1.50:8765. The phone must be able to reach it over the network.</string>
+    <string name="settings_ai_save">Save</string>
+    <string name="settings_ai_test">Test</string>
+    <string name="settings_ai_saved">Server address saved</string>
+    <string name="settings_ai_cleared">Server address cleared</string>
+    <string name="settings_ai_empty">Enter an address first</string>
+    <string name="settings_ai_testing">Testing&#8230;</string>
+    <string name="settings_ai_ok">Connected. Songs already analysed on the server: %1$d</string>
+    <string name="settings_ai_failed">Cannot use the server: %1$s</string>
     <string name="settings_sample_tag">Artist One, Artist Two</string>
     <string name="settings_preview">%1$s\n&#8594;  %2$s</string>
 </resources>

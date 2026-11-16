@@ -2,6 +2,8 @@ package me.Integer.Mediaplayer.ui
 
 import android.net.Uri
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.view.LayoutInflater
 import android.view.View
 import android.widget.EditText
@@ -12,10 +14,13 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.widget.doAfterTextChanged
 import androidx.fragment.app.Fragment
 import me.Integer.Mediaplayer.R
+import me.Integer.Mediaplayer.library.AiMashupClient
 import me.Integer.Mediaplayer.library.ArtistSplitter
 import me.Integer.Mediaplayer.library.LibraryRepository
 import me.Integer.Mediaplayer.library.MusicFolderStore
 import me.Integer.Mediaplayer.library.PlayerSettings
+import java.io.IOException
+import java.util.concurrent.Executors
 
 /** Music folders and the artist separator. */
 class SettingsFragment : Fragment(R.layout.fragment_settings), LibraryRepository.Listener {
@@ -26,6 +31,15 @@ class SettingsFragment : Fragment(R.layout.fragment_settings), LibraryRepository
     private lateinit var rescanButton: View
     private lateinit var separatorInput: EditText
     private lateinit var previewView: TextView
+    private lateinit var aiServerInput: EditText
+    private lateinit var aiStatusView: TextView
+    private val main = Handler(Looper.getMainLooper())
+    private val worker = Executors.newSingleThreadExecutor { task ->
+        Thread(task, "Mediaplayer-AiServerTest").apply { isDaemon = true }
+    }
+
+    /** Answers from an older test carry an older number and are dropped. */
+    private var testGeneration = 0L
 
     private val pickFolder =
         registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri -> onFolderPicked(uri) }
@@ -44,6 +58,7 @@ class SettingsFragment : Fragment(R.layout.fragment_settings), LibraryRepository
         rescanButton.setOnClickListener { repository.rescan() }
         if (savedInstanceState == null) separatorInput.setText(repository.settings.artistSeparator)
         separatorInput.doAfterTextChanged { renderPreview() }
+        wireAiServer(view, savedInstanceState)
     }
 
     override fun onStart() {
@@ -111,6 +126,72 @@ class SettingsFragment : Fragment(R.layout.fragment_settings), LibraryRepository
             )
             state.total <= 0 -> getString(R.string.library_scanning_folders)
             else -> getString(R.string.library_scanning, state.done, state.total)
+        }
+    }
+
+    override fun onDestroy() {
+        worker.shutdownNow()
+        super.onDestroy()
+    }
+
+    // ------------------------------------------------------------------ AI mashup server
+
+    private fun wireAiServer(view: View, savedInstanceState: Bundle?) {
+        aiServerInput = view.findViewById(R.id.settingsAiServer)
+        aiStatusView = view.findViewById(R.id.settingsAiStatus)
+        if (savedInstanceState == null) aiServerInput.setText(repository.settings.aiServerUrl)
+        view.findViewById<View>(R.id.settingsAiSave).setOnClickListener { saveAiServer() }
+        view.findViewById<View>(R.id.settingsAiTest).setOnClickListener { testAiServer() }
+    }
+
+    /** A blank field clears the address; an unusable one is refused. */
+    private fun saveAiServer() {
+        val typed = aiServerInput.text?.toString().orEmpty()
+        val clean = PlayerSettings.sanitiseServerUrl(typed)
+        if (typed.isNotBlank() && clean.isEmpty()) {
+            aiStatusView.setText(R.string.mashup_server_invalid)
+            return
+        }
+        repository.settings.aiServerUrl = clean
+        aiServerInput.setText(clean)
+        val message = if (clean.isEmpty()) R.string.settings_ai_cleared else R.string.settings_ai_saved
+        Toast.makeText(requireContext(), message, Toast.LENGTH_SHORT).show()
+    }
+
+    /** Checks the typed address without saving it. */
+    private fun testAiServer() {
+        val url = PlayerSettings.sanitiseServerUrl(aiServerInput.text?.toString())
+        if (url.isEmpty()) {
+            aiStatusView.setText(R.string.settings_ai_empty)
+            return
+        }
+        val run = ++testGeneration
+        aiStatusView.setText(R.string.settings_ai_testing)
+        val client = AiMashupClient(requireContext(), url)
+        worker.execute {
+            val outcome = pingServer(client)
+            main.post { showTestOutcome(run, outcome) }
+        }
+    }
+
+    /** Worker thread. The number of analysed songs and an empty reason, or -1 and the reason. */
+    private fun pingServer(client: AiMashupClient): Pair<Int, String> {
+        return try {
+            client.ping() to ""
+        } catch (e: IOException) {
+            -1 to (e.message ?: e.javaClass.simpleName)
+        } catch (e: RuntimeException) {
+            -1 to (e.message ?: e.javaClass.simpleName)
+        }
+    }
+
+    private fun showTestOutcome(run: Long, outcome: Pair<Int, String>) {
+        if (!isAdded || view == null || run != testGeneration) return
+        val (count, reason) = outcome
+        aiStatusView.text = if (count >= 0) {
+            getString(R.string.settings_ai_ok, count)
+        } else {
+            getString(R.string.settings_ai_failed, reason)
         }
     }
 
