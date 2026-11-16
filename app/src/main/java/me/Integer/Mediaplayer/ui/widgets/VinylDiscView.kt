@@ -12,6 +12,7 @@ import android.graphics.RectF
 import android.graphics.Shader
 import android.util.AttributeSet
 import android.view.View
+import android.view.animation.AccelerateDecelerateInterpolator
 import android.view.animation.DecelerateInterpolator
 import android.view.animation.Interpolator
 import android.view.animation.OvershootInterpolator
@@ -43,10 +44,10 @@ class VinylDiscView @JvmOverloads constructor(
     private val sheenPaint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val discPath = Path()
     private val labelPath = Path()
+    private val groovePath = Path()
+    private val sheenPath = Path()
     private val discBounds = RectF()
     private val accentBounds = RectF()
-    private val grooveRadii = FloatArray(GROOVE_COUNT)
-    private val grooveAlpha = IntArray(GROOVE_COUNT)
     private val rimNormalWidth: Float
     private val rimScrubWidth: Float
 
@@ -306,15 +307,9 @@ class VinylDiscView @JvmOverloads constructor(
             invalidate()
             return
         }
-        val now = System.nanoTime()
-        val liftDoneAt = if (outgoingLiftInPlace && isOutgoingActive(now)) {
-            outgoingStartNanos + (outgoingNanos * OUTGOING_LIFT_FRACTION).toLong()
-        } else {
-            now
-        }
         phase = PHASE_ENTERING
         enterFrom = directionSign(direction) * travel
-        enterStartNanos = maxOf(now, liftDoneAt)
+        enterStartNanos = System.nanoTime()
         enterNanos = duration
         invalidate()
         scheduleFrame()
@@ -392,6 +387,7 @@ class VinylDiscView @JvmOverloads constructor(
         accentBounds.set(cx - accent, cy - accent, cx + accent, cy + accent)
         rebuildRing(discPath, radius)
         rebuildRing(labelPath, labelRadius)
+        rebuildSheen()
         discPaint.shader = if (radius > 0f) {
             RadialGradient(cx, cy, radius, COLOR_DISC_CENTER, COLOR_DISC_EDGE, Shader.TileMode.CLAMP)
         } else {
@@ -412,14 +408,27 @@ class VinylDiscView @JvmOverloads constructor(
         path.addCircle(cx, cy, holeRadius, Path.Direction.CW)
     }
 
+    private fun rebuildSheen() {
+        sheenPath.reset()
+        if (radius <= holeRadius) return
+        sheenPath.moveTo(cx, cy)
+        sheenPath.arcTo(discBounds, SHEEN_START_A, SHEEN_SWEEP)
+        sheenPath.close()
+        sheenPath.moveTo(cx, cy)
+        sheenPath.arcTo(discBounds, SHEEN_START_B, SHEEN_SWEEP)
+        sheenPath.close()
+        sheenPath.op(discPath, Path.Op.INTERSECT)
+    }
+
     private fun layoutGrooves() {
         val inner = labelRadius * GROOVE_INNER
         val outer = radius * GROOVE_OUTER
         val step = maxOf(0f, outer - inner) / GROOVE_COUNT
         groovePaint.strokeWidth = maxOf(1f, step * 0.3f)
+        groovePath.reset()
         for (i in 0 until GROOVE_COUNT) {
-            grooveRadii[i] = inner + step * (i + 0.5f)
-            grooveAlpha[i] = if (i % 4 == 0) 200 else if (i % 2 == 0) 120 else 70
+            val r = inner + step * (i + 0.5f)
+            if (r > 0f) groovePath.addCircle(cx, cy, r, Path.Direction.CW)
         }
     }
 
@@ -444,89 +453,80 @@ class VinylDiscView @JvmOverloads constructor(
         if (isOutgoingActive(now)) {
             drawDisc(canvas, outgoingOffset(now), discScale * outgoingSwapScale(now), true, 1f)
         }
-        val waitingToEnter = phase == PHASE_ENTERING && now < enterStartNanos
-        if (phase != PHASE_HIDDEN && !waitingToEnter) {
+        if (phase != PHASE_HIDDEN) {
             drawDisc(canvas, currentOffset(now), discScale * currentSwapScale(now), false, crossfadeProgress(now))
         }
     }
 
-    /** One record at a horizontal offset and scale; it fades as it moves away from the centre. */
+    /** One record at a horizontal offset and scale; fades via paint alpha without saveLayerAlpha. */
     private fun drawDisc(canvas: Canvas, offset: Float, scale: Float, outgoing: Boolean, progress: Float) {
-        val alpha = slideAlpha(offset)
-        val saved = if (alpha < OPAQUE) {
-            canvas.saveLayerAlpha(0f, 0f, width.toFloat(), height.toFloat(), alpha)
-        } else {
-            canvas.save()
-        }
+        val fade = slideFade(offset)
+        val saved = canvas.save()
         canvas.translate(offset, 0f)
         canvas.scale(scale, scale, cx, cy)
         canvas.save()
         canvas.rotate(angle, cx, cy)
-        if (outgoing) drawOutgoingSurface(canvas) else drawSurface(canvas, progress)
+        if (outgoing) drawOutgoingSurface(canvas, fade) else drawSurface(canvas, progress, fade)
         canvas.restore()
-        drawSheen(canvas)
+        sheenPaint.alpha = (SHEEN_ALPHA * fade).roundToInt()
+        canvas.drawPath(sheenPath, sheenPaint)
+        rimPaint.alpha = alphaOf(fade)
+        holeRimPaint.alpha = (HOLE_RIM_ALPHA * fade).roundToInt()
         canvas.drawCircle(cx, cy, radius, rimPaint)
         canvas.drawCircle(cx, cy, holeRadius, holeRimPaint)
         canvas.restoreToCount(saved)
     }
 
-    private fun drawOutgoingSurface(canvas: Canvas) {
+    private fun drawOutgoingSurface(canvas: Canvas, fade: Float) {
         if (outgoingShader == null) {
-            drawPlaceholder(canvas)
+            drawPlaceholder(canvas, fade)
             return
         }
-        outgoingPaint.alpha = OPAQUE
+        outgoingPaint.alpha = alphaOf(fade)
         canvas.drawPath(discPath, outgoingPaint)
-        drawGrooves(canvas, COLOR_GROOVE_ON_ART, ART_GROOVE_ALPHA_SCALE)
+        drawGrooves(canvas, COLOR_GROOVE_ON_ART, ART_GROOVE_ALPHA_SCALE * fade)
     }
 
     /** Old surface underneath, new surface fading in on top (or old art fading off). */
-    private fun drawSurface(canvas: Canvas, progress: Float) {
+    private fun drawSurface(canvas: Canvas, progress: Float, fade: Float) {
         if (artShader != null) {
-            if (progress < 1f) drawPreviousSurface(canvas)
-            artPaint.alpha = alphaOf(progress)
+            if (progress < 1f) drawPreviousSurface(canvas, fade)
+            artPaint.alpha = alphaOf(progress * fade)
             canvas.drawPath(discPath, artPaint)
-            drawGrooves(canvas, COLOR_GROOVE_ON_ART, ART_GROOVE_ALPHA_SCALE)
+            drawGrooves(canvas, COLOR_GROOVE_ON_ART, ART_GROOVE_ALPHA_SCALE * fade)
             return
         }
-        drawPlaceholder(canvas)
+        drawPlaceholder(canvas, fade)
         if (progress < 1f && previousShader != null) {
-            previousPaint.alpha = alphaOf(1f - progress)
+            previousPaint.alpha = alphaOf((1f - progress) * fade)
             canvas.drawPath(discPath, previousPaint)
         }
     }
 
-    private fun drawPreviousSurface(canvas: Canvas) {
+    private fun drawPreviousSurface(canvas: Canvas, fade: Float) {
         if (previousShader == null) {
-            drawPlaceholder(canvas)
+            drawPlaceholder(canvas, fade)
             return
         }
-        previousPaint.alpha = OPAQUE
+        previousPaint.alpha = alphaOf(fade)
         canvas.drawPath(discPath, previousPaint)
     }
 
-    private fun drawPlaceholder(canvas: Canvas) {
+    private fun drawPlaceholder(canvas: Canvas, fade: Float) {
+        val alpha = alphaOf(fade)
+        discPaint.alpha = alpha
+        labelEmptyPaint.alpha = alpha
+        accentPaint.alpha = alpha
         canvas.drawPath(discPath, discPaint)
-        drawGrooves(canvas, COLOR_GROOVE, 1f)
+        drawGrooves(canvas, COLOR_GROOVE, fade)
         canvas.drawPath(labelPath, labelEmptyPaint)
         canvas.drawArc(accentBounds, -60f, 120f, false, accentPaint)
     }
 
     private fun drawGrooves(canvas: Canvas, color: Int, alphaScale: Float) {
         groovePaint.color = color
-        for (i in 0 until GROOVE_COUNT) {
-            groovePaint.alpha = (grooveAlpha[i] * alphaScale).roundToInt()
-            canvas.drawCircle(cx, cy, grooveRadii[i], groovePaint)
-        }
-    }
-
-    /** Fixed glare: it stays put while the record turns underneath, and skips the hole. */
-    private fun drawSheen(canvas: Canvas) {
-        canvas.save()
-        canvas.clipPath(discPath)
-        canvas.drawArc(discBounds, SHEEN_START_A, SHEEN_SWEEP, true, sheenPaint)
-        canvas.drawArc(discBounds, SHEEN_START_B, SHEEN_SWEEP, true, sheenPaint)
-        canvas.restore()
+        groovePaint.alpha = (GROOVE_BASE_ALPHA * alphaScale).roundToInt().coerceIn(0, OPAQUE)
+        canvas.drawPath(groovePath, groovePaint)
     }
 
     private fun alphaOf(fraction: Float): Int {
@@ -552,10 +552,8 @@ class VinylDiscView @JvmOverloads constructor(
 
     private fun currentOffset(now: Long): Float {
         if (phase == PHASE_ENTERING) {
-            if (now < enterStartNanos) return enterFrom
             val p = fraction(now, enterStartNanos, enterNanos)
-            val slideP = (p / ENTER_SLIDE_FRACTION).coerceIn(0f, 1f)
-            return enterFrom * (1f - SLIDE_INTERPOLATOR.getInterpolation(slideP))
+            return enterFrom * (1f - SLIDE_INTERPOLATOR.getInterpolation(p))
         }
         if (isSpringing(now)) {
             val p = fraction(now, springStartNanos, springNanos)
@@ -566,10 +564,9 @@ class VinylDiscView @JvmOverloads constructor(
 
     private fun currentSwapScale(now: Long): Float {
         if (phase == PHASE_ENTERING) {
-            if (now < enterStartNanos) return LIFT_MULT
             val p = fraction(now, enterStartNanos, enterNanos)
-            if (p <= ENTER_SLIDE_FRACTION) return LIFT_MULT
-            val settleP = ((p - ENTER_SLIDE_FRACTION) / (1f - ENTER_SLIDE_FRACTION)).coerceIn(0f, 1f)
+            if (p <= ENTER_HOLD_BIG_FRACTION) return LIFT_MULT
+            val settleP = ((p - ENTER_HOLD_BIG_FRACTION) / (1f - ENTER_HOLD_BIG_FRACTION)).coerceIn(0f, 1f)
             return 1f + (LIFT_MULT - 1f) * (1f - FADE_INTERPOLATOR.getInterpolation(settleP))
         }
         val offset = abs(currentOffset(now))
@@ -581,19 +578,15 @@ class VinylDiscView @JvmOverloads constructor(
 
     private fun outgoingOffset(now: Long): Float {
         val p = fraction(now, outgoingStartNanos, outgoingNanos)
-        if (!outgoingLiftInPlace) {
-            return outgoingFrom + (outgoingTo - outgoingFrom) * SLIDE_INTERPOLATOR.getInterpolation(p)
-        }
-        if (p <= OUTGOING_LIFT_FRACTION) return outgoingFrom
-        val slideP = ((p - OUTGOING_LIFT_FRACTION) / (1f - OUTGOING_LIFT_FRACTION)).coerceIn(0f, 1f)
-        return outgoingFrom + (outgoingTo - outgoingFrom) * SLIDE_INTERPOLATOR.getInterpolation(slideP)
+        val curve = if (outgoingLiftInPlace) OUTGOING_INTERPOLATOR else SLIDE_INTERPOLATOR
+        return outgoingFrom + (outgoingTo - outgoingFrom) * curve.getInterpolation(p)
     }
 
     private fun outgoingSwapScale(now: Long): Float {
         if (!outgoingLiftInPlace) return LIFT_MULT
         val p = fraction(now, outgoingStartNanos, outgoingNanos)
-        if (p >= OUTGOING_LIFT_FRACTION) return LIFT_MULT
-        val liftP = (p / OUTGOING_LIFT_FRACTION).coerceIn(0f, 1f)
+        if (p >= OUTGOING_LIFT_PEAK) return LIFT_MULT
+        val liftP = (p / OUTGOING_LIFT_PEAK).coerceIn(0f, 1f)
         return 1f + (LIFT_MULT - 1f) * FADE_INTERPOLATOR.getInterpolation(liftP)
     }
 
@@ -605,11 +598,11 @@ class VinylDiscView @JvmOverloads constructor(
         return springNanos > 0L && now - springStartNanos < springNanos
     }
 
-    private fun slideAlpha(offset: Float): Int {
+    private fun slideFade(offset: Float): Float {
         val travel = slideDistance()
-        if (travel <= 0f || offset == 0f) return OPAQUE
+        if (travel <= 0f || offset == 0f) return 1f
         val away = minOf(1f, abs(offset) / travel)
-        return (OPAQUE * (1f - SLIDE_FADE * away)).roundToInt()
+        return 1f - SLIDE_FADE * away
     }
 
     private fun fraction(now: Long, start: Long, duration: Long): Float {
@@ -753,16 +746,16 @@ class VinylDiscView @JvmOverloads constructor(
         const val MAX_FRAME_SECONDS = 0.1f
         const val NANOS_PER_SECOND = 1e9f
         const val CROSSFADE_NANOS = 450000000L
-        const val SLIDE_NANOS = 420000000L
-        const val OUTGOING_NANOS = 520000000L
-        const val ENTER_NANOS = 620000000L
+        const val SLIDE_NANOS = 380000000L
+        const val OUTGOING_NANOS = 420000000L
+        const val ENTER_NANOS = 480000000L
         const val MIN_SLIDE_NANOS = 120000000L
         const val SPRING_NANOS = 320000000L
-        const val OUTGOING_LIFT_FRACTION = 0.28f
-        const val ENTER_SLIDE_FRACTION = 0.68f
-        const val LIFT_MULT = 1.09f
+        const val OUTGOING_LIFT_PEAK = 0.35f
+        const val ENTER_HOLD_BIG_FRACTION = 0.42f
+        const val LIFT_MULT = 1.14f
         const val DRAG_LIFT_SPAN = 0.35f
-        const val DISC_RADIUS_FRACTION = 0.455f
+        const val DISC_RADIUS_FRACTION = 0.435f
         const val REWIND_RATE = 5f // 1/s, share of the remaining turn per second
         const val REWIND_DONE_DEGREES = 0.5f
         const val MAX_SPIN_DEGREES = 1080f
@@ -784,6 +777,9 @@ class VinylDiscView @JvmOverloads constructor(
         const val SHEEN_START_A = -70f
         const val SHEEN_START_B = 110f
         const val SHEEN_SWEEP = 35f
+        const val GROOVE_BASE_ALPHA = 130
+        const val SHEEN_ALPHA = 20
+        const val HOLE_RIM_ALPHA = 153
         const val OPAQUE = 255
 
         const val COLOR_DISC_CENTER = 0xFF1C1F26.toInt()
@@ -797,7 +793,8 @@ class VinylDiscView @JvmOverloads constructor(
         const val COLOR_SHEEN = 0x14FFFFFF
 
         val FADE_INTERPOLATOR: Interpolator = DecelerateInterpolator()
-        val SLIDE_INTERPOLATOR: Interpolator = DecelerateInterpolator(1.6f)
+        val OUTGOING_INTERPOLATOR: Interpolator = AccelerateDecelerateInterpolator()
+        val SLIDE_INTERPOLATOR: Interpolator = DecelerateInterpolator(1.7f)
         val SPRING_INTERPOLATOR: Interpolator = OvershootInterpolator(1.2f)
     }
 }
