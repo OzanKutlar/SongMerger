@@ -2,6 +2,7 @@ package me.Integer.Mediaplayer.playback
 
 import android.content.ComponentName
 import android.content.Context
+import android.net.Uri
 import android.os.SystemClock
 import android.util.Log
 import androidx.core.content.ContextCompat
@@ -117,6 +118,8 @@ class PlayerConnection(context: Context, private val listener: NowPlayingListene
             .setTitle(track.title)
             .setArtist(artist.ifEmpty { null })
             .setAlbumTitle(track.album.ifEmpty { null })
+            // The service reads the embedded cover of this file for the notification.
+            .setArtworkUri(Uri.parse(track.uri))
             .build()
         return MediaItem.Builder()
             .setMediaId(track.uri)

@@ -1,0 +1,82 @@
+package me.Integer.Mediaplayer.ui
+
+import android.os.Bundle
+import android.view.View
+import android.widget.TextView
+import androidx.fragment.app.Fragment
+import androidx.recyclerview.widget.LinearLayoutManager
+import androidx.recyclerview.widget.RecyclerView
+import me.Integer.Mediaplayer.R
+import me.Integer.Mediaplayer.library.LibraryRepository
+import me.Integer.Mediaplayer.library.Track
+
+/** One artist and every song they appear on, alone or with others. */
+class ArtistFragment : Fragment(R.layout.fragment_artist), LibraryRepository.Listener, PlayerHost.Listener {
+
+    private lateinit var repository: LibraryRepository
+    private lateinit var host: PlayerHost
+    private lateinit var adapter: TrackAdapter
+    private lateinit var countView: TextView
+    private var artistName = ""
+    private var tracks: List<Track> = emptyList()
+
+    override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
+        super.onViewCreated(view, savedInstanceState)
+        repository = LibraryRepository.get(requireContext())
+        host = requireActivity() as PlayerHost
+        artistName = arguments?.getString(ARG_NAME).orEmpty()
+        countView = view.findViewById(R.id.artistSongCount)
+        view.findViewById<TextView>(R.id.artistTitle).text =
+            artistName.ifEmpty { getString(R.string.library_unknown_artist) }
+        view.findViewById<View>(R.id.artistBack).setOnClickListener { (requireActivity() as Navigator).goBack() }
+        adapter = TrackAdapter(
+            artistLine = { track -> repository.displayArtist(track).ifEmpty { getString(R.string.library_unknown_artist) } },
+            onClick = { index -> host.playTracks(tracks, index) },
+            onMenu = { track, anchor -> TrackMenu.show(anchor, track, host, repository) }
+        )
+        val list = view.findViewById<RecyclerView>(R.id.artistList)
+        list.layoutManager = LinearLayoutManager(requireContext())
+        list.adapter = adapter
+    }
+
+    override fun onStart() {
+        super.onStart()
+        repository.addListener(this)
+        host.addPlayerListener(this)
+        refresh()
+        onPlayerChanged()
+    }
+
+    override fun onStop() {
+        host.removePlayerListener(this)
+        repository.removeListener(this)
+        super.onStop()
+    }
+
+    override fun onLibraryChanged() {
+        refresh()
+    }
+
+    override fun onScanState(state: LibraryRepository.ScanState) = Unit
+
+    override fun onPlayerChanged() {
+        adapter.setPlaying(host.nowPlaying.trackUri)
+    }
+
+    private fun refresh() {
+        val artist = repository.artists().firstOrNull { it.name.equals(artistName, ignoreCase = true) }
+        tracks = artist?.tracks ?: emptyList()
+        adapter.submit(tracks)
+        countView.text = resources.getQuantityString(R.plurals.library_song_count, tracks.size, tracks.size)
+    }
+
+    companion object {
+        private const val ARG_NAME = "artist_name"
+
+        fun create(name: String): ArtistFragment {
+            return ArtistFragment().apply {
+                arguments = Bundle().apply { putString(ARG_NAME, name) }
+            }
+        }
+    }
+}

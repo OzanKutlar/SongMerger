@@ -20,6 +20,7 @@ import me.Integer.Mediaplayer.MainActivity
 class PlaybackService : MediaSessionService() {
 
     private var session: MediaSession? = null
+    private var artLoader: EmbeddedArtBitmapLoader? = null
 
     /**
      * Media items lose their URI on the way from the app to the service, so it is restored
@@ -41,10 +42,12 @@ class PlaybackService : MediaSessionService() {
 
     override fun onCreate() {
         super.onCreate()
-        val player = buildPlayer()
-        session = MediaSession.Builder(this, player)
+        val loader = EmbeddedArtBitmapLoader(this)
+        artLoader = loader
+        session = MediaSession.Builder(this, buildPlayer())
             .setCallback(sessionCallback)
             .setSessionActivity(openAppIntent())
+            .setBitmapLoader(loader)
             .build()
     }
 
@@ -64,6 +67,8 @@ class PlaybackService : MediaSessionService() {
             current.release()
         }
         session = null
+        artLoader?.shutdown()
+        artLoader = null
         super.onDestroy()
     }
 

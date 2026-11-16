@@ -2,40 +2,46 @@ package me.Integer.Mediaplayer
 
 import android.Manifest
 import android.content.pm.PackageManager
-import android.net.Uri
+import android.graphics.Bitmap
 import android.os.Build
 import android.os.Bundle
 import android.util.Log
-import android.view.View
-import android.widget.TextView
-import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
-import me.Integer.Mediaplayer.library.Artist
+import androidx.fragment.app.Fragment
+import me.Integer.Mediaplayer.library.CoverArtLoader
 import me.Integer.Mediaplayer.library.LibraryRepository
+import me.Integer.Mediaplayer.library.Track
 import me.Integer.Mediaplayer.playback.NowPlaying
 import me.Integer.Mediaplayer.playback.NowPlayingListener
-import me.Integer.Mediaplayer.playback.PlaybackClock
 import me.Integer.Mediaplayer.playback.PlayerConnection
+import me.Integer.Mediaplayer.ui.ArtistFragment
+import me.Integer.Mediaplayer.ui.LibraryFragment
+import me.Integer.Mediaplayer.ui.Navigator
+import me.Integer.Mediaplayer.ui.NowPlayingFragment
+import me.Integer.Mediaplayer.ui.PlayerHost
+import me.Integer.Mediaplayer.ui.SettingsFragment
+import kotlin.math.roundToInt
 
 /**
- * Temporary check screen: add a folder, scan it, list the detected artists and start
- * playback. It exists so the library and playback layers can be verified on a phone
- * before the player UI lands.
+ * Hosts the screens. It owns the one connection to the playback service and the cover of
+ * the current song, and shares both with the fragments through [PlayerHost].
  */
-class MainActivity : AppCompatActivity(), LibraryRepository.Listener, NowPlayingListener {
+class MainActivity : AppCompatActivity(), PlayerHost, Navigator, NowPlayingListener {
 
     private lateinit var repository: LibraryRepository
-    private lateinit var connection: PlayerConnection
-    private lateinit var statusView: TextView
-    private lateinit var listView: TextView
-    private lateinit var nowView: TextView
-    private lateinit var rescanButton: View
-    private var nowPlaying = NowPlaying.IDLE
+    private lateinit var artLoader: CoverArtLoader
+    private val listeners = ArrayList<PlayerHost.Listener>()
 
-    private val pickFolder =
-        registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri -> onFolderPicked(uri) }
+    override lateinit var connection: PlayerConnection
+        private set
+    override var nowPlaying: NowPlaying = NowPlaying.IDLE
+        private set
+    override var currentArt: Bitmap? = null
+        private set
+    override var isArtResolved: Boolean = true
+        private set
 
     private val askNotifications =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
@@ -47,67 +53,69 @@ class MainActivity : AppCompatActivity(), LibraryRepository.Listener, NowPlaying
         setContentView(R.layout.activity_main)
         repository = LibraryRepository.get(this)
         connection = PlayerConnection(this, this)
-        statusView = findViewById(R.id.libraryStatus)
-        listView = findViewById(R.id.libraryList)
-        nowView = findViewById(R.id.playerNow)
-        rescanButton = findViewById(R.id.libraryRescan)
-        wireButtons()
-    }
-
-    private fun wireButtons() {
-        findViewById<View>(R.id.libraryAddFolder).setOnClickListener { pickFolder.launch(null) }
-        rescanButton.setOnClickListener { repository.rescan() }
-        findViewById<View>(R.id.playerPlayAll).setOnClickListener { playAll() }
-        findViewById<View>(R.id.playerToggle).setOnClickListener { togglePlayback() }
-        findViewById<View>(R.id.playerNext).setOnClickListener { connection.next() }
+        artLoader = CoverArtLoader(this, (ART_SIZE_DP * resources.displayMetrics.density).roundToInt())
+        repository.loadIfNeeded()
+        if (savedInstanceState == null) {
+            supportFragmentManager.beginTransaction()
+                .replace(R.id.mainContainer, LibraryFragment())
+                .commit()
+        }
     }
 
     override fun onStart() {
         super.onStart()
-        repository.addListener(this)
-        repository.loadIfNeeded()
         connection.connect()
-        render()
-        renderPlayer()
     }
 
     override fun onStop() {
         connection.release()
-        repository.removeListener(this)
         super.onStop()
     }
 
-    override fun onLibraryChanged() {
-        render()
+    override fun onDestroy() {
+        artLoader.shutdown()
+        super.onDestroy()
     }
 
-    override fun onScanState(state: LibraryRepository.ScanState) {
-        render()
+    // ------------------------------------------------------------------ player host
+
+    override fun addPlayerListener(listener: PlayerHost.Listener) {
+        if (listener !in listeners) listeners.add(listener)
+    }
+
+    override fun removePlayerListener(listener: PlayerHost.Listener) {
+        listeners.remove(listener)
+    }
+
+    override fun playTracks(tracks: List<Track>, startIndex: Int) {
+        ensureNotificationPermission()
+        connection.playTracks(tracks, startIndex) { repository.displayArtist(it) }
     }
 
     override fun onNowPlaying(state: NowPlaying) {
+        val trackChanged = state.trackUri != nowPlaying.trackUri
         nowPlaying = state
-        renderPlayer()
+        if (trackChanged) refreshArt(state.trackUri)
+        notifyPlayerChanged()
     }
 
-    // ------------------------------------------------------------------ actions
-
-    private fun onFolderPicked(uri: Uri?) {
-        if (uri == null) return
-        if (!repository.folders.add(uri)) {
-            Toast.makeText(this, R.string.library_folder_failed, Toast.LENGTH_LONG).show()
-            return
-        }
-        repository.rescan()
+    private fun refreshArt(trackUri: String) {
+        currentArt = null
+        isArtResolved = trackUri.isEmpty()
+        if (trackUri.isEmpty()) return
+        artLoader.load(trackUri) { loadedUri, art -> onArtLoaded(loadedUri, art) }
     }
 
-    private fun playAll() {
-        ensureNotificationPermission()
-        connection.playTracks(repository.tracks, 0) { repository.displayArtist(it) }
+    private fun onArtLoaded(trackUri: String, art: Bitmap?) {
+        if (trackUri != nowPlaying.trackUri) return // an older request finished late
+        val firstAnswer = !isArtResolved
+        currentArt = art
+        isArtResolved = true
+        if (firstAnswer) notifyPlayerChanged()
     }
 
-    private fun togglePlayback() {
-        if (nowPlaying.playing) connection.pause() else connection.play()
+    private fun notifyPlayerChanged() {
+        for (listener in ArrayList(listeners)) listener.onPlayerChanged()
     }
 
     /** Android 13+ only shows the playback notification after this permission is granted. */
@@ -118,50 +126,39 @@ class MainActivity : AppCompatActivity(), LibraryRepository.Listener, NowPlaying
         askNotifications.launch(permission)
     }
 
-    // ------------------------------------------------------------------ rendering
+    // ------------------------------------------------------------------ navigation
 
-    private fun render() {
-        val artists = repository.artists()
-        val scan = repository.scanState
-        rescanButton.isEnabled = !scan.running
-        statusView.text = statusText(scan, artists.size)
-        listView.text = if (artists.isEmpty() && !scan.running) {
-            getString(R.string.library_empty)
-        } else {
-            artistLines(artists)
-        }
+    override fun openNowPlaying() {
+        if (supportFragmentManager.findFragmentById(R.id.mainContainer) is NowPlayingFragment) return
+        open(NowPlayingFragment())
     }
 
-    private fun renderPlayer() {
-        val state = nowPlaying
-        nowView.text = if (!state.active) {
-            getString(R.string.player_idle)
-        } else {
-            val artist = state.artist.ifEmpty { getString(R.string.library_unknown_artist) }
-            getString(R.string.player_line, state.title, artist, PlaybackClock.format(state.durationMs))
-        }
+    override fun openArtist(name: String) {
+        open(ArtistFragment.create(name))
     }
 
-    private fun statusText(scan: LibraryRepository.ScanState, artistCount: Int): String {
-        if (!scan.running) {
-            return getString(
-                R.string.library_status,
-                repository.tracks.size, artistCount, repository.folders.folders().size
+    override fun openSettings() {
+        open(SettingsFragment())
+    }
+
+    override fun goBack() {
+        onBackPressedDispatcher.onBackPressed()
+    }
+
+    private fun open(fragment: Fragment) {
+        if (supportFragmentManager.isStateSaved) return
+        supportFragmentManager.beginTransaction()
+            .setCustomAnimations(
+                android.R.anim.fade_in, android.R.anim.fade_out,
+                android.R.anim.fade_in, android.R.anim.fade_out
             )
-        }
-        if (scan.total <= 0) return getString(R.string.library_scanning_folders)
-        return getString(R.string.library_scanning, scan.done, scan.total)
-    }
-
-    private fun artistLines(artists: List<Artist>): String {
-        val unknown = getString(R.string.library_unknown_artist)
-        return artists.take(MAX_LINES).joinToString("\n") { artist ->
-            getString(R.string.library_artist_line, artist.name.ifEmpty { unknown }, artist.tracks.size)
-        }
+            .replace(R.id.mainContainer, fragment)
+            .addToBackStack(null)
+            .commit()
     }
 
     private companion object {
         const val TAG = "MainActivity"
-        const val MAX_LINES = 500
+        const val ART_SIZE_DP = 360
     }
 }
