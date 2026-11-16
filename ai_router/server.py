@@ -8,6 +8,7 @@ from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
+from urllib.parse import unquote_plus
 
 import numpy as np
 
@@ -82,10 +83,10 @@ def make_handler(ctx: RouterContext) -> type[BaseHTTPRequestHandler]:
 
         def _handle_upload_track(self) -> None:
             track_id = self.headers.get("X-Track-Id", "").strip()
-            title = self.headers.get("X-Track-Title", "").strip() or track_id
-            artist = self.headers.get("X-Track-Artist", "").strip()
+            title = unquote_plus(self.headers.get("X-Track-Title", "")).strip() or track_id
+            artist = unquote_plus(self.headers.get("X-Track-Artist", "")).strip()
             fingerprint = self.headers.get("X-Track-Fingerprint", "").strip()
-            filename = self.headers.get("X-Track-Filename", "track.mp3").strip()
+            filename = unquote_plus(self.headers.get("X-Track-Filename", "track.mp3")).strip()
             length = int(self.headers.get("Content-Length", "0") or "0")
 
             if not track_id or length <= 0 or length > MAX_UPLOAD_BYTES:

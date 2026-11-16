@@ -40,6 +40,25 @@ class PlaylistStore(context: Context, private val onChanged: () -> Unit) {
         return playlist
     }
 
+    /**
+     * Creates a mashup playlist that plays [segments] in order.
+     *
+     * @return null when the name is blank, there are fewer than two steps, or there are
+     * too many playlists
+     */
+    fun createMix(rawName: String?, segments: List<MixSegment>): Playlist? {
+        val name = Playlist.cleanName(rawName)
+        val items = items()
+        val steps = segments.filter { it.trackUri.isNotEmpty() }.take(MAX_SEGMENTS)
+        if (name.isEmpty() || steps.size < MIN_MIX_STEPS || items.size >= MAX_PLAYLISTS) return null
+        val id = (items.maxOfOrNull { it.id } ?: 0L) + 1L
+        val uris = steps.map { it.trackUri }.distinct().take(MAX_TRACKS)
+        val playlist = Playlist(id, name, uris, segments = steps)
+        items.add(playlist)
+        commit()
+        return playlist
+    }
+
     fun rename(id: Long, rawName: String?): Boolean {
         val name = Playlist.cleanName(rawName)
         if (name.isEmpty()) return false
@@ -59,7 +78,9 @@ class PlaylistStore(context: Context, private val onChanged: () -> Unit) {
         val playlist = get(id) ?: return false
         if (trackUri.isEmpty() || trackUri in playlist.trackUris) return false
         if (playlist.trackUris.size >= MAX_TRACKS) return false
-        return update(id) { it.copy(trackUris = it.trackUris + trackUri) }
+        return update(id) {
+            it.copy(trackUris = it.trackUris + trackUri, segments = extended(it, listOf(trackUri)))
+        }
     }
 
     /** Appends [trackUris] not yet in the playlist in one write; returns how many were added. */
@@ -76,7 +97,7 @@ class PlaylistStore(context: Context, private val onChanged: () -> Unit) {
             }
         }
         if (additions.isEmpty()) return 0
-        update(id) { it.copy(trackUris = it.trackUris + additions) }
+        update(id) { it.copy(trackUris = it.trackUris + additions, segments = extended(it, additions)) }
         return additions.size
     }
 
@@ -86,6 +107,7 @@ class PlaylistStore(context: Context, private val onChanged: () -> Unit) {
             val wasCover = old.coverType == Playlist.COVER_TRACK && old.coverRef == trackUri
             old.copy(
                 trackUris = old.trackUris - trackUri,
+                segments = without(old.segments, trackUri),
                 coverType = if (wasCover) Playlist.COVER_AUTO else old.coverType,
                 coverRef = if (wasCover) "" else old.coverRef
             )
@@ -97,6 +119,8 @@ class PlaylistStore(context: Context, private val onChanged: () -> Unit) {
      * currently not in the library) keep their place at the end.
      */
     fun reorder(id: Long, ordered: List<String>) {
+        // The steps of a mashup were chosen for this order, so it is not rearranged.
+        if (get(id)?.isMix == true) return
         update(id) { old ->
             val known = old.trackUris.toSet()
             val kept = ordered.filter { it in known }.distinct()
@@ -179,7 +203,55 @@ class PlaylistStore(context: Context, private val onChanged: () -> Unit) {
         val uris = List(count) { array.optString(it) }.filter { it.isNotEmpty() }
         val type = item.optInt("cover").takeIf { it in Playlist.COVER_AUTO..Playlist.COVER_IMAGE }
             ?: Playlist.COVER_AUTO
-        return Playlist(id, name, uris, type, item.optString("ref"))
+        val segments = toSegments(item.optJSONArray("segments"))
+        return Playlist(id, name, uris, type, item.optString("ref"), segments)
+    }
+
+    /** Unusable steps are dropped; fewer than two usable steps reads as a plain playlist. */
+    private fun toSegments(array: JSONArray?): List<MixSegment> {
+        if (array == null) return emptyList()
+        val count = minOf(array.length(), MAX_SEGMENTS)
+        val segments = ArrayList<MixSegment>(count)
+        for (i in 0 until count) {
+            val item = array.optJSONObject(i) ?: continue
+            val segment = MixSegment.create(
+                item.optString("u"),
+                item.optLong("s", 0L),
+                item.optLong("e", MixSegment.END_OF_TRACK),
+                item.optLong("x", MixSegment.DEFAULT_CROSSFADE_MS)
+            )
+            if (segment != null) segments.add(segment)
+        }
+        return if (segments.size >= MIN_MIX_STEPS) segments else emptyList()
+    }
+
+    private fun segmentsJson(segments: List<MixSegment>): JSONArray {
+        val array = JSONArray()
+        for (segment in segments.take(MAX_SEGMENTS)) {
+            array.put(
+                JSONObject()
+                    .put("u", segment.trackUri)
+                    .put("s", segment.startMs)
+                    .put("e", segment.endMs)
+                    .put("x", segment.crossfadeMs)
+            )
+        }
+        return array
+    }
+
+    /** A mashup gains each new song as a whole-song step; a plain playlist has no steps. */
+    private fun extended(playlist: Playlist, uris: List<String>): List<MixSegment> {
+        if (!playlist.isMix) return emptyList()
+        val added = uris.map {
+            MixSegment(it, 0L, MixSegment.END_OF_TRACK, MixSegment.DEFAULT_CROSSFADE_MS)
+        }
+        return (playlist.segments + added).take(MAX_SEGMENTS)
+    }
+
+    /** The steps without one song; with fewer than two left the playlist becomes a plain one. */
+    private fun without(segments: List<MixSegment>, trackUri: String): List<MixSegment> {
+        val kept = segments.filter { it.trackUri != trackUri }
+        return if (kept.size >= MIN_MIX_STEPS) kept else emptyList()
     }
 
     private fun write(playlists: List<Playlist>) {
@@ -208,6 +280,7 @@ class PlaylistStore(context: Context, private val onChanged: () -> Unit) {
                     .put("cover", playlist.coverType)
                     .put("ref", playlist.coverRef)
                     .put("tracks", JSONArray(playlist.trackUris.take(MAX_TRACKS)))
+                    .put("segments", segmentsJson(playlist.segments))
             )
         }
         return JSONObject().put(KEY_VERSION, VERSION).put(KEY_PLAYLISTS, array).toString()
@@ -221,5 +294,7 @@ class PlaylistStore(context: Context, private val onChanged: () -> Unit) {
         const val KEY_PLAYLISTS = "playlists"
         const val MAX_PLAYLISTS = 500
         const val MAX_TRACKS = 10000
+        const val MAX_SEGMENTS = 2000
+        const val MIN_MIX_STEPS = 2
     }
 }
