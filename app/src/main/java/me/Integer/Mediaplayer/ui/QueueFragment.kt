@@ -4,16 +4,19 @@ import android.os.Bundle
 import android.view.View
 import android.widget.ImageView
 import android.widget.TextView
+import androidx.core.view.OneShotPreDrawListener
 import androidx.fragment.app.Fragment
 import androidx.recyclerview.widget.ItemTouchHelper
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import me.Integer.Mediaplayer.R
 import me.Integer.Mediaplayer.ui.widgets.PressFeedback
+import me.Integer.Mediaplayer.ui.widgets.ShuffleItemAnimator
 
 /**
  * Shows the current playback queue in exact upcoming order. Allows dragging rows to
  * reorder them, tapping a row to jump to it, removing rows, and toggling shuffle.
+ * When the order is shuffled or restored, the rows slide to their new seats.
  */
 class QueueFragment : Fragment(R.layout.fragment_queue), PlayerHost.Listener {
 
@@ -24,11 +27,13 @@ class QueueFragment : Fragment(R.layout.fragment_queue), PlayerHost.Listener {
     private lateinit var emptyView: TextView
     private lateinit var shuffleButton: View
     private lateinit var shuffleIcon: ImageView
+    private lateinit var shuffleMotion: ShuffleItemAnimator
 
     private var dragging = false
     private var dragFrom = -1
     private var dragTo = -1
     private var scrolledInitially = false
+    private var shownShuffleOn: Boolean? = null
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
@@ -38,6 +43,7 @@ class QueueFragment : Fragment(R.layout.fragment_queue), PlayerHost.Listener {
         emptyView = view.findViewById(R.id.queueEmpty)
         shuffleButton = view.findViewById(R.id.queueShuffle)
         shuffleIcon = view.findViewById(R.id.queueShuffleIcon)
+        shownShuffleOn = null
         view.findViewById<View>(R.id.queueBack).setOnClickListener { (requireActivity() as Navigator).goBack() }
         PressFeedback.attach(shuffleButton, shuffleIcon)
         shuffleButton.setOnClickListener { host.connection.toggleShuffle() }
@@ -49,9 +55,12 @@ class QueueFragment : Fragment(R.layout.fragment_queue), PlayerHost.Listener {
             unknownArtist = getString(R.string.library_unknown_artist),
             onStartDrag = { holder -> touchHelper.startDrag(holder) },
             onTap = { index -> host.connection.skipToQueueItem(index) },
-            onRemove = { index -> host.connection.removeQueueItem(index) }
+            onRemove = { index -> host.connection.removeQueueItem(index) },
+            onReorder = { previous, next, activeIndex -> prepareShuffleMotion(previous, next, activeIndex) }
         )
+        shuffleMotion = ShuffleItemAnimator(list)
         list.layoutManager = LinearLayoutManager(requireContext())
+        list.itemAnimator = shuffleMotion
         list.adapter = adapter
         touchHelper.attachToRecyclerView(list)
     }
@@ -64,6 +73,7 @@ class QueueFragment : Fragment(R.layout.fragment_queue), PlayerHost.Listener {
 
     override fun onStop() {
         host.removePlayerListener(this)
+        shuffleMotion.disarm()
         super.onStop()
     }
 
@@ -75,17 +85,38 @@ class QueueFragment : Fragment(R.layout.fragment_queue), PlayerHost.Listener {
         val state = host.nowPlaying
         val queue = state.queue
         adapter.submit(queue, state.currentIndex)
-        emptyView.visibility = if (queue.isEmpty()) View.VISIBLE else View.GONE
-        subtitleView.text = if (queue.isEmpty()) {
+        val emptyVisibility = if (queue.isEmpty()) View.VISIBLE else View.GONE
+        if (emptyView.visibility != emptyVisibility) emptyView.visibility = emptyVisibility
+        val subtitle = if (queue.isEmpty()) {
             getString(R.string.player_idle)
         } else {
             getString(R.string.queue_position, state.currentIndex + 1, queue.size)
         }
-        shuffleIcon.setColorFilter(if (state.shuffleOn) COLOR_ON else COLOR_IDLE)
+        if (subtitleView.text.toString() != subtitle) subtitleView.text = subtitle
+        if (shownShuffleOn != state.shuffleOn) {
+            shownShuffleOn = state.shuffleOn
+            shuffleIcon.setColorFilter(if (state.shuffleOn) COLOR_ON else COLOR_IDLE)
+        }
         if (!scrolledInitially && state.currentIndex in queue.indices) {
             scrolledInitially = true
             list.scrollToPosition(state.currentIndex)
         }
+    }
+
+    /**
+     * Called by the adapter right before it shows a reordered queue. Arms the fly animation
+     * for the coming layout pass and keeps the playing song where it is on screen, as far
+     * as its new seat allows.
+     */
+    private fun prepareShuffleMotion(previous: LongArray, next: LongArray, activeIndex: Int) {
+        val manager = list.layoutManager as? LinearLayoutManager ?: return
+        val firstVisible = maxOf(0, manager.findFirstVisibleItemPosition())
+        shuffleMotion.arm(firstVisible, { uid -> previous.indexOf(uid) }, { uid -> next.indexOf(uid) })
+        OneShotPreDrawListener.add(list) { shuffleMotion.disarm() }
+        if (activeIndex !in next.indices) return
+        val activeRow = list.findViewHolderForItemId(next[activeIndex])
+        val offset = if (activeRow == null) 0 else maxOf(0, activeRow.itemView.top - list.paddingTop)
+        manager.scrollToPositionWithOffset(activeIndex, offset)
     }
 
     private fun createTouchHelper(): ItemTouchHelper {

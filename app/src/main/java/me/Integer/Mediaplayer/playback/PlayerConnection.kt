@@ -4,6 +4,8 @@ import android.content.ComponentName
 import android.content.Context
 import android.net.Uri
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.os.SystemClock
 import android.util.Log
 import androidx.core.content.ContextCompat
@@ -11,7 +13,10 @@ import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.Player
+import androidx.media3.common.Timeline
 import androidx.media3.session.MediaController
+import androidx.media3.session.SessionCommand
+import androidx.media3.session.SessionResult
 import androidx.media3.session.SessionToken
 import com.google.common.util.concurrent.ListenableFuture
 import me.Integer.Mediaplayer.library.Track
@@ -22,19 +27,27 @@ import java.util.concurrent.ExecutionException
  * The screens' remote control for [PlaybackService]: transport commands in, [NowPlaying]
  * snapshots out. Connecting starts the service if needed; releasing does not stop the music.
  *
- * Shuffle is implemented by physically reordering the player's media items rather than
- * ExoPlayer's hidden shuffle index. That way the queue view always shows the real upcoming
- * order and dragging items or tapping "Play next" works predictably.
+ * Shuffle physically reorders the player's media items rather than using ExoPlayer's hidden
+ * shuffle index, so the queue view always shows the real upcoming order and dragging items
+ * or tapping "Play next" works predictably. The reordering and the pre-shuffle order live
+ * in the service; this class only asks for them. Main thread only.
  */
 class PlayerConnection(context: Context, private val listener: NowPlayingListener) {
 
     private val appContext = context.applicationContext
+    private val main = Handler(Looper.getMainLooper())
     private var pending: ListenableFuture<MediaController>? = null
     private var controller: MediaController? = null
 
     private var shuffleEnabled = false
-    private val originalOrder = ArrayList<MediaItem>()
     private var nextUid = 1L
+    private var queue = TimelineQueue.EMPTY
+    private var publishQueued = false
+
+    private val publishTask = Runnable {
+        publishQueued = false
+        publishNow()
+    }
 
     private val playerListener = object : Player.Listener {
         override fun onEvents(player: Player, events: Player.Events) {
@@ -56,6 +69,8 @@ class PlayerConnection(context: Context, private val listener: NowPlayingListene
     }
 
     fun release() {
+        main.removeCallbacks(publishTask)
+        publishQueued = false
         controller?.removeListener(playerListener)
         controller = null
         pending?.let { MediaController.releaseFuture(it) }
@@ -64,45 +79,110 @@ class PlayerConnection(context: Context, private val listener: NowPlayingListene
 
     private fun onConnected(future: ListenableFuture<MediaController>) {
         if (pending !== future) return
-        try {
-            val connected = future.get()
-            connected.shuffleModeEnabled = false
-            connected.addListener(playerListener)
-            controller = connected
-            if (originalOrder.isEmpty() && connected.mediaItemCount > 0) {
-                originalOrder.addAll(currentItems(connected))
-            }
-        } catch (e: ExecutionException) {
-            connectionFailed(e)
-            return
-        } catch (e: CancellationException) {
-            connectionFailed(e)
-            return
-        } catch (e: InterruptedException) {
-            Thread.currentThread().interrupt()
-            connectionFailed(e)
+        val connected = resultOf(future, "connecting to the playback service")
+        if (connected == null) {
+            pending = null
             return
         }
+        connected.shuffleModeEnabled = false
+        connected.addListener(playerListener)
+        controller = connected
+        // Songs already queued keep their ids, so new ones must start above them.
+        nextUid = maxOf(nextUid, highestUid(connected) + 1L)
+        requestShuffleState(connected)
         publish()
     }
 
-    private fun connectionFailed(e: Exception) {
-        Log.w(TAG, "cannot connect to the playback service: ${e.message}")
-        pending = null
+    /** The value of a finished [future], or null (logged) when it failed. */
+    private fun <T : Any> resultOf(future: ListenableFuture<T>, what: String): T? {
+        return try {
+            future.get()
+        } catch (e: ExecutionException) {
+            Log.w(TAG, "$what failed: ${e.message}")
+            null
+        } catch (e: CancellationException) {
+            Log.w(TAG, "$what was cancelled")
+            null
+        } catch (e: InterruptedException) {
+            Thread.currentThread().interrupt()
+            Log.w(TAG, "$what was interrupted")
+            null
+        }
+    }
+
+    private fun highestUid(player: Player): Long {
+        val timeline = player.currentTimeline
+        val window = Timeline.Window()
+        val count = minOf(timeline.windowCount, MAX_QUEUE)
+        var highest = 0L
+        for (i in 0 until count) {
+            highest = maxOf(highest, QueueCommands.uidOf(timeline.getWindow(i, window).mediaItem))
+        }
+        return highest
+    }
+
+    // ------------------------------------------------------------------ service commands
+
+    /** The service is the source of truth for shuffle; this reads it after connecting. */
+    private fun requestShuffleState(player: MediaController) {
+        val future = player.sendCustomCommand(QueueCommands.GET_STATE, Bundle.EMPTY)
+        future.addListener({
+            val result = resultOf(future, "reading the shuffle state")
+            if (result != null && controller === player) applyShuffleState(result)
+        }, ContextCompat.getMainExecutor(appContext))
+    }
+
+    private fun applyShuffleState(result: SessionResult) {
+        if (result.resultCode != SessionResult.RESULT_SUCCESS) {
+            Log.w(TAG, "the shuffle state was refused with code ${result.resultCode}")
+            return
+        }
+        val enabled = result.extras.getBoolean(QueueCommands.ARG_ENABLED, shuffleEnabled)
+        if (enabled == shuffleEnabled) return
+        shuffleEnabled = enabled
+        publish()
+    }
+
+    /** Sends a queue command; a refusal is logged and the real state is read back. */
+    private fun send(player: MediaController, command: SessionCommand, args: Bundle) {
+        val future = player.sendCustomCommand(command, args)
+        future.addListener({
+            val result = resultOf(future, command.customAction)
+            val refused = result == null || result.resultCode != SessionResult.RESULT_SUCCESS
+            if (refused && controller === player) {
+                Log.w(TAG, "${command.customAction} did not succeed")
+                requestShuffleState(player)
+            }
+        }, ContextCompat.getMainExecutor(appContext))
     }
 
     // ------------------------------------------------------------------ queue
 
-    /** Replaces the queue with [tracks] and starts playing at [startIndex]. */
-    fun playTracks(tracks: List<Track>, startIndex: Int, artistOf: (Track) -> String) {
+    /**
+     * Replaces the queue with [tracks] and starts playing at [startIndex].
+     *
+     * @param shuffle the shuffle mode for the new queue; by default the current one is kept
+     */
+    fun playTracks(
+        tracks: List<Track>,
+        startIndex: Int,
+        shuffle: Boolean = shuffleEnabled,
+        artistOf: (Track) -> String
+    ) {
         val player = controller ?: return
         if (tracks.isEmpty()) return
         val items = tracks.take(MAX_QUEUE).map { toItem(it, artistOf(it)) }
         val index = startIndex.coerceIn(0, items.size - 1)
-        originalOrder.clear()
-        originalOrder.addAll(items)
+        val scramble = shuffle && items.size > 1
+        shuffleEnabled = shuffle
+        val original = if (scramble) LongArray(items.size) { QueueCommands.uidOf(items[it]) } else LongArray(0)
+        val args = Bundle().apply {
+            putBoolean(QueueCommands.ARG_ENABLED, shuffle)
+            putLongArray(QueueCommands.ARG_UIDS, original)
+        }
+        send(player, QueueCommands.ADOPT_ORDER, args)
         player.shuffleModeEnabled = false
-        if (shuffleEnabled && items.size > 1) {
+        if (scramble) {
             val first = items[index]
             val rest = items.filterIndexed { i, _ -> i != index }.shuffled()
             val scrambled = ArrayList<MediaItem>(items.size).apply {
@@ -123,7 +203,6 @@ class PlayerConnection(context: Context, private val listener: NowPlayingListene
         val item = toItem(track, artist)
         val wasEmpty = player.mediaItemCount == 0
         val insertAt = if (wasEmpty) 0 else (player.currentMediaItemIndex + 1).coerceAtMost(player.mediaItemCount)
-        originalOrder.add(item)
         player.addMediaItem(insertAt, item)
         if (wasEmpty) startFresh(player) else publish()
     }
@@ -132,7 +211,6 @@ class PlayerConnection(context: Context, private val listener: NowPlayingListene
         val player = controller ?: return
         val item = toItem(track, artist)
         val wasEmpty = player.mediaItemCount == 0
-        originalOrder.add(item)
         player.addMediaItem(item)
         if (wasEmpty) startFresh(player) else publish()
     }
@@ -147,10 +225,7 @@ class PlayerConnection(context: Context, private val listener: NowPlayingListene
 
     fun removeQueueItem(index: Int) {
         val player = controller ?: return
-        val count = player.mediaItemCount
-        if (index !in 0 until count) return
-        val removedUid = uidOf(player.getMediaItemAt(index))
-        originalOrder.removeAll { uidOf(it) == removedUid }
+        if (index !in 0 until player.mediaItemCount) return
         player.removeMediaItem(index)
         publish()
     }
@@ -169,7 +244,7 @@ class PlayerConnection(context: Context, private val listener: NowPlayingListene
 
     private fun toItem(track: Track, artist: String): MediaItem {
         val uid = nextUid++
-        val extras = Bundle().apply { putLong(EXTRA_UID, uid) }
+        val extras = Bundle().apply { putLong(QueueCommands.EXTRA_UID, uid) }
         val metadata = MediaMetadata.Builder()
             .setTitle(track.title)
             .setArtist(artist.ifEmpty { null })
@@ -184,7 +259,7 @@ class PlayerConnection(context: Context, private val listener: NowPlayingListene
             .build()
     }
 
-    // ------------------------------------------------------------------ transport & physical shuffle
+    // ------------------------------------------------------------------ transport & shuffle
 
     fun play() {
         val player = controller ?: return
@@ -220,47 +295,18 @@ class PlayerConnection(context: Context, private val listener: NowPlayingListene
     }
 
     /**
-     * Physically scrambles or restores the queue around the active track without interrupting
-     * playback.
+     * Asks the service to scramble or restore the queue around the active track. The button
+     * state changes at once; the new order arrives with the next snapshot.
      */
     fun setShuffle(enabled: Boolean) {
         if (shuffleEnabled == enabled) return
         shuffleEnabled = enabled
-        val player = controller ?: return
-        player.shuffleModeEnabled = false
-        val count = player.mediaItemCount
-        if (count <= 1) {
-            publish()
-            return
-        }
-        val current = currentItems(player)
-        if (originalOrder.isEmpty()) originalOrder.addAll(current)
-        val activeIndex = player.currentMediaItemIndex.coerceIn(0, count - 1)
-        if (enabled) {
-            scrambleAroundActive(player, current, activeIndex)
-        } else {
-            restoreOriginalAroundActive(player, current[activeIndex], activeIndex)
+        val player = controller
+        if (player != null) {
+            val args = Bundle().apply { putBoolean(QueueCommands.ARG_ENABLED, enabled) }
+            send(player, QueueCommands.SET_SHUFFLE, args)
         }
         publish()
-    }
-
-    private fun scrambleAroundActive(player: MediaController, items: List<MediaItem>, activeIndex: Int) {
-        val others = items.filterIndexed { index, _ -> index != activeIndex }.shuffled()
-        if (activeIndex > 0) player.moveMediaItem(activeIndex, 0)
-        player.replaceMediaItems(1, player.mediaItemCount, others)
-    }
-
-    private fun restoreOriginalAroundActive(player: MediaController, active: MediaItem, activeIndex: Int) {
-        val activeUid = uidOf(active)
-        val origIdx = originalOrder.indexOfFirst { uidOf(it) == activeUid }
-            .takeIf { it >= 0 }
-            ?: originalOrder.indexOfFirst { it.mediaId == active.mediaId }
-        if (origIdx < 0) return
-        val before = originalOrder.subList(0, origIdx).toList()
-        val after = originalOrder.subList(origIdx + 1, originalOrder.size).toList()
-        if (activeIndex > 0) player.moveMediaItem(activeIndex, 0)
-        player.replaceMediaItems(1, player.mediaItemCount, after)
-        if (before.isNotEmpty()) player.addMediaItems(0, before)
     }
 
     /** Off, repeat all, repeat one, and back to off. */
@@ -275,7 +321,14 @@ class PlayerConnection(context: Context, private val listener: NowPlayingListene
 
     // ------------------------------------------------------------------ snapshot
 
+    /** Several changes in a row become one snapshot, delivered right after them. */
     private fun publish() {
+        if (publishQueued) return
+        publishQueued = true
+        main.post(publishTask)
+    }
+
+    private fun publishNow() {
         val player = controller
         listener.onNowPlaying(if (player == null) NowPlaying.IDLE else snapshot(player))
     }
@@ -284,7 +337,6 @@ class PlayerConnection(context: Context, private val listener: NowPlayingListene
         val item = player.currentMediaItem ?: return NowPlaying.IDLE
         val duration = player.duration.takeIf { it != C.TIME_UNSET && it > 0L } ?: 0L
         val state = player.playbackState
-        val queue = buildQueueSnapshot(player)
         return NowPlaying(
             active = true,
             trackUri = item.mediaId,
@@ -303,37 +355,18 @@ class PlayerConnection(context: Context, private val listener: NowPlayingListene
             shuffleOn = shuffleEnabled,
             repeatMode = repeatModeOf(player.repeatMode),
             currentIndex = player.currentMediaItemIndex,
-            queue = queue
+            queue = queueOf(player)
         )
     }
 
-    private fun buildQueueSnapshot(player: MediaController): List<QueueItem> {
-        val count = minOf(player.mediaItemCount, MAX_QUEUE)
-        val list = ArrayList<QueueItem>(count)
-        for (i in 0 until count) {
-            val item = player.getMediaItemAt(i)
-            val meta = item.mediaMetadata
-            val uid = uidOf(item).takeIf { it != 0L } ?: (i.toLong() + 1L)
-            list.add(
-                QueueItem(
-                    uid = uid,
-                    trackUri = item.mediaId,
-                    title = meta.title?.toString().orEmpty(),
-                    artist = meta.artist?.toString().orEmpty(),
-                    album = meta.albumTitle?.toString().orEmpty()
-                )
-            )
-        }
-        return list
-    }
-
-    private fun currentItems(player: MediaController): List<MediaItem> {
-        val count = minOf(player.mediaItemCount, MAX_QUEUE)
-        return List(count) { player.getMediaItemAt(it) }
-    }
-
-    private fun uidOf(item: MediaItem): Long {
-        return item.mediaMetadata.extras?.getLong(EXTRA_UID, 0L) ?: 0L
+    /** The same list object for as long as the player's timeline does not change. */
+    private fun queueOf(player: Player): TimelineQueue {
+        val timeline = player.currentTimeline
+        val cached = queue
+        if (cached.timeline === timeline) return cached
+        val fresh = TimelineQueue.of(timeline, MAX_QUEUE)
+        queue = fresh
+        return fresh
     }
 
     private fun repeatModeOf(mode: Int): Int {
@@ -347,6 +380,5 @@ class PlayerConnection(context: Context, private val listener: NowPlayingListene
     private companion object {
         const val TAG = "PlayerConnection"
         const val MAX_QUEUE = 50000
-        const val EXTRA_UID = "queue_uid"
     }
 }

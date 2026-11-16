@@ -115,9 +115,9 @@ class MainActivity : AppCompatActivity(), PlayerHost, Navigator, NowPlayingListe
 
     override fun playAll(tracks: List<Track>, shuffle: Boolean) {
         if (tracks.isEmpty()) return
-        connection.setShuffle(shuffle)
+        ensureNotificationPermission()
         val start = if (shuffle) Random.nextInt(tracks.size) else 0
-        playTracks(tracks, start)
+        connection.playTracks(tracks, start, shuffle) { repository.displayArtist(it) }
     }
 
     override fun onNowPlaying(state: NowPlaying) {
