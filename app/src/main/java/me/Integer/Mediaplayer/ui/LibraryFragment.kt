@@ -3,6 +3,8 @@ package me.Integer.Mediaplayer.ui
 import android.animation.ArgbEvaluator
 import android.animation.ValueAnimator
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.util.TypedValue
 import android.view.View
 import android.view.animation.DecelerateInterpolator
@@ -22,6 +24,7 @@ import me.Integer.Mediaplayer.library.Track
 import me.Integer.Mediaplayer.library.TrackSorter
 import me.Integer.Mediaplayer.ui.widgets.PressFeedback
 import java.util.Locale
+import java.util.concurrent.Executors
 import kotlin.math.abs
 
 /**
@@ -52,6 +55,14 @@ class LibraryFragment : Fragment(R.layout.fragment_library), LibraryRepository.L
     private lateinit var shuffleButton: View
     private lateinit var playAllButton: View
     private val tabAnimators = HashMap<TextView, ValueAnimator>()
+
+    private val worker = Executors.newSingleThreadExecutor { task ->
+        Thread(task, "Mediaplayer-LibraryFilter").apply { isDaemon = true }
+    }
+    private val main = Handler(Looper.getMainLooper())
+    private var refreshGeneration = 0L
+    private var libraryVersion = 0L
+    private var lastDiffLibVersion = -1L
 
     private var activeTab = TAB_SONGS
     private var query = ""
@@ -94,7 +105,13 @@ class LibraryFragment : Fragment(R.layout.fragment_library), LibraryRepository.L
         super.onStop()
     }
 
+    override fun onDestroy() {
+        worker.shutdownNow()
+        super.onDestroy()
+    }
+
     override fun onLibraryChanged() {
+        libraryVersion++
         refresh()
     }
 
@@ -279,51 +296,112 @@ class LibraryFragment : Fragment(R.layout.fragment_library), LibraryRepository.L
     // ------------------------------------------------------------------ rendering
 
     private fun refresh() {
-        val needle = query.trim().lowercase(Locale.ROOT)
-        val shown = when (activeTab) {
-            TAB_FAVORITES -> showSongs(repository.favoriteTracks(), needle)
-            TAB_ARTISTS -> showArtists(needle)
-            TAB_PLAYLISTS -> showPlaylists(needle)
-            else -> showSongs(repository.tracks, needle)
-        }
-        if (lastRowCount == 0 && shown > 0) list.scheduleLayoutAnimation()
-        lastRowCount = shown
         renderTabs()
         renderCardHeader()
-        renderEmpty(shown)
         renderScan(repository.scanState)
+        if (activeTab != TAB_PLAYLISTS && !repository.isLoaded && repository.tracks.isEmpty()) {
+            refreshGeneration++
+            showSkeleton()
+            return
+        }
+        val gen = ++refreshGeneration
+        val libVer = libraryVersion
+        val needle = query.trim().lowercase(Locale.ROOT)
+        when (activeTab) {
+            TAB_ARTISTS -> refreshArtists(gen, libVer, needle)
+            TAB_PLAYLISTS -> refreshPlaylists(gen, libVer, needle)
+            TAB_FAVORITES -> refreshSongs(gen, libVer, repository.favoriteTracks(), needle)
+            else -> refreshSongs(gen, libVer, repository.tracks, needle)
+        }
     }
 
-    /** @return the number of rows shown */
-    private fun showSongs(source: List<Track>, needle: String): Int {
-        val matching = source.filter { track ->
-            needle.isEmpty() ||
-                track.title.lowercase(Locale.ROOT).contains(needle) ||
-                track.artistTag.lowercase(Locale.ROOT).contains(needle)
+    private fun showSkeleton() {
+        emptyView.visibility = View.GONE
+        if (activeTab == TAB_ARTISTS) {
+            artistAdapter.setLoading(true)
+            if (list.adapter !== artistAdapter) list.adapter = artistAdapter
+        } else {
+            trackAdapter.setLoading(true)
+            if (list.adapter !== trackAdapter) list.adapter = trackAdapter
         }
-        visibleTracks = TrackSorter.sort(matching, repository.settings.trackSort) { repository.displayArtist(it) }
-        trackAdapter.submit(visibleTracks)
-        if (list.adapter !== trackAdapter) list.adapter = trackAdapter
-        return visibleTracks.size
     }
 
-    private fun showArtists(needle: String): Int {
-        val matching = repository.artists().filter { artist ->
-            needle.isEmpty() || artist.name.lowercase(Locale.ROOT).contains(needle)
+    private fun refreshSongs(gen: Long, libVer: Long, source: List<Track>, needle: String) {
+        val trackSort = repository.settings.trackSort
+        val artistLines = source.associate { it.uri to repository.displayArtist(it) }
+        val oldRows = if (list.adapter === trackAdapter && !trackAdapter.isLoading) trackAdapter.rows() else emptyList()
+        val canDiff = oldRows.isNotEmpty() && lastDiffLibVersion == libVer
+        worker.execute {
+            val matching = if (needle.isEmpty()) {
+                source
+            } else {
+                source.filter { track ->
+                    track.title.lowercase(Locale.ROOT).contains(needle) ||
+                        track.artistTag.lowercase(Locale.ROOT).contains(needle)
+                }
+            }
+            val sorted = TrackSorter.sort(matching, trackSort) { artistLines[it.uri].orEmpty() }
+            val diff = if (canDiff && sorted.isNotEmpty()) TrackAdapter.diff(oldRows, sorted) else null
+            main.post {
+                if (!isAdded || gen != refreshGeneration) return@post
+                lastDiffLibVersion = libVer
+                visibleTracks = sorted
+                trackAdapter.submit(sorted, diff)
+                if (list.adapter !== trackAdapter) list.adapter = trackAdapter
+                onRowsReady(sorted.size)
+            }
         }
-        val sorted = ArtistSorter.sort(matching, repository.settings.artistSort)
-        artistAdapter.submit(sorted)
-        if (list.adapter !== artistAdapter) list.adapter = artistAdapter
-        return sorted.size
     }
 
-    private fun showPlaylists(needle: String): Int {
-        val playlists = repository.playlists.all().filter { playlist ->
-            needle.isEmpty() || playlist.name.lowercase(Locale.ROOT).contains(needle)
+    private fun refreshArtists(gen: Long, libVer: Long, needle: String) {
+        val source = repository.artists()
+        val artistSort = repository.settings.artistSort
+        val oldRows = if (list.adapter === artistAdapter && !artistAdapter.isLoading) artistAdapter.rows() else emptyList()
+        val canDiff = oldRows.isNotEmpty() && lastDiffLibVersion == libVer
+        worker.execute {
+            val matching = if (needle.isEmpty()) {
+                source
+            } else {
+                source.filter { artist -> artist.name.lowercase(Locale.ROOT).contains(needle) }
+            }
+            val sorted = ArtistSorter.sort(matching, artistSort)
+            val diff = if (canDiff && sorted.isNotEmpty()) ArtistAdapter.diff(oldRows, sorted) else null
+            main.post {
+                if (!isAdded || gen != refreshGeneration) return@post
+                lastDiffLibVersion = libVer
+                artistAdapter.submit(sorted, diff)
+                if (list.adapter !== artistAdapter) list.adapter = artistAdapter
+                onRowsReady(sorted.size)
+            }
         }
-        playlistAdapter.submit(playlists)
-        if (list.adapter !== playlistAdapter) list.adapter = playlistAdapter
-        return playlists.size
+    }
+
+    private fun refreshPlaylists(gen: Long, libVer: Long, needle: String) {
+        val source = repository.playlists.all()
+        val oldRows = if (list.adapter === playlistAdapter) playlistAdapter.rows() else emptyList()
+        val canDiff = oldRows.isNotEmpty() && lastDiffLibVersion == libVer
+        worker.execute {
+            val matching = if (needle.isEmpty()) {
+                source
+            } else {
+                source.filter { playlist -> playlist.name.lowercase(Locale.ROOT).contains(needle) }
+            }
+            val diff = if (canDiff && matching.isNotEmpty()) PlaylistAdapter.diff(oldRows, matching) else null
+            main.post {
+                if (!isAdded || gen != refreshGeneration) return@post
+                lastDiffLibVersion = libVer
+                playlistAdapter.submit(matching, diff)
+                if (list.adapter !== playlistAdapter) list.adapter = playlistAdapter
+                onRowsReady(matching.size)
+            }
+        }
+    }
+
+    private fun onRowsReady(shown: Int) {
+        if (lastRowCount == 0 && shown > 0) list.scheduleLayoutAnimation()
+        lastRowCount = shown
+        renderCardHeader()
+        renderEmpty(shown)
     }
 
     private fun renderTabs() {

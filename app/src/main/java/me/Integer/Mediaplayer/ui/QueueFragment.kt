@@ -111,12 +111,41 @@ class QueueFragment : Fragment(R.layout.fragment_queue), PlayerHost.Listener {
     private fun prepareShuffleMotion(previous: LongArray, next: LongArray, activeIndex: Int) {
         val manager = list.layoutManager as? LinearLayoutManager ?: return
         val firstVisible = maxOf(0, manager.findFirstVisibleItemPosition())
-        shuffleMotion.arm(firstVisible, { uid -> previous.indexOf(uid) }, { uid -> next.indexOf(uid) })
+        val firstView = manager.findViewByPosition(firstVisible)
+        val rowHeight = firstView?.height?.takeIf { it > 0 }
+            ?: (DEFAULT_ROW_DP * resources.displayMetrics.density).toInt()
+        val viewportHeight = maxOf(rowHeight, list.height - list.paddingTop - list.paddingBottom)
+        val activeUid = if (activeIndex in next.indices) next[activeIndex] else RecyclerView.NO_ID
+        val activeRow = if (activeUid != RecyclerView.NO_ID) list.findViewHolderForItemId(activeUid) else null
+        val oldActiveIdx = if (activeUid != RecyclerView.NO_ID) previous.indexOf(activeUid) else -1
+        val activeOldTop = when {
+            activeRow != null -> activeRow.itemView.top
+            oldActiveIdx in 0 until firstVisible -> list.paddingTop - rowHeight
+            oldActiveIdx >= 0 -> list.height - list.paddingBottom
+            else -> Int.MIN_VALUE
+        }
+        val oldOffset = firstView?.let { it.top - list.paddingTop } ?: 0
+        val oldScrollPx = firstVisible * rowHeight - oldOffset
+        val targetOffset = maxOf(0, (viewportHeight - rowHeight) / 2)
+        val approxNewScrollPx = if (activeIndex in next.indices) {
+            maxOf(0, activeIndex * rowHeight - targetOffset)
+        } else {
+            oldScrollPx
+        }
+        val cameraDeltaPx = approxNewScrollPx - oldScrollPx
+
+        shuffleMotion.arm(
+            previousFirstVisible = firstVisible,
+            previousIndexOf = { uid -> previous.indexOf(uid) },
+            nextIndexOf = { uid -> next.indexOf(uid) },
+            activeUid = activeUid,
+            activeOldTop = activeOldTop,
+            cameraDeltaPx = cameraDeltaPx
+        )
         OneShotPreDrawListener.add(list) { shuffleMotion.disarm() }
-        if (activeIndex !in next.indices) return
-        val activeRow = list.findViewHolderForItemId(next[activeIndex])
-        val offset = if (activeRow == null) 0 else maxOf(0, activeRow.itemView.top - list.paddingTop)
-        manager.scrollToPositionWithOffset(activeIndex, offset)
+        if (activeIndex in next.indices) {
+            manager.scrollToPositionWithOffset(activeIndex, targetOffset)
+        }
     }
 
     private fun createTouchHelper(): ItemTouchHelper {
@@ -172,5 +201,6 @@ class QueueFragment : Fragment(R.layout.fragment_queue), PlayerHost.Listener {
         const val COLOR_ON = 0xFF00E676.toInt()
         const val COLOR_IDLE = 0xFFECEFF1.toInt()
         const val DRAG_ALPHA = 0.75f
+        const val DEFAULT_ROW_DP = 76f
     }
 }

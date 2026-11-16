@@ -6,9 +6,11 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.ImageView
 import android.widget.TextView
+import androidx.recyclerview.widget.DiffUtil
 import androidx.recyclerview.widget.RecyclerView
 import me.Integer.Mediaplayer.R
 import me.Integer.Mediaplayer.library.Artist
+import me.Integer.Mediaplayer.ui.widgets.SkeletonDrawable
 
 /** Artist rows: a round cover from their first song, the name and the number of songs. */
 class ArtistAdapter(
@@ -22,18 +24,37 @@ class ArtistAdapter(
         val name: TextView = view.findViewById(R.id.artistName)
         val count: TextView = view.findViewById(R.id.artistCount)
         val divider: View = view.findViewById(R.id.artistDivider)
+        var isSkeleton = false
     }
 
     private var artists: List<Artist> = emptyList()
+    var isLoading = false
+        private set
+
+    fun rows(): List<Artist> = artists
 
     @SuppressLint("NotifyDataSetChanged")
-    fun submit(next: List<Artist>) {
+    fun setLoading(loading: Boolean) {
+        if (isLoading == loading) return
+        isLoading = loading
+        if (artists.isEmpty()) notifyDataSetChanged()
+    }
+
+    @SuppressLint("NotifyDataSetChanged")
+    fun submit(next: List<Artist>, diff: DiffUtil.DiffResult? = null) {
+        val wasLoading = isLoading
+        val hadArtists = artists.isNotEmpty()
+        isLoading = false
         artists = next
-        notifyDataSetChanged()
+        if (diff != null && !wasLoading && hadArtists && next.isNotEmpty()) {
+            diff.dispatchUpdatesTo(this)
+        } else {
+            notifyDataSetChanged()
+        }
     }
 
     override fun getItemCount(): Int {
-        return artists.size
+        return if (isLoading && artists.isEmpty()) SKELETON_COUNT else artists.size
     }
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): Holder {
@@ -48,12 +69,67 @@ class ArtistAdapter(
     }
 
     override fun onBindViewHolder(holder: Holder, position: Int) {
+        if (isLoading && artists.isEmpty()) {
+            bindSkeleton(holder, position)
+            return
+        }
         val artist = artists.getOrNull(position) ?: return
+        if (holder.isSkeleton) {
+            holder.isSkeleton = false
+            holder.name.background = null
+            holder.count.background = null
+            setWidth(holder.name, ViewGroup.LayoutParams.MATCH_PARENT)
+            setWidth(holder.count, ViewGroup.LayoutParams.MATCH_PARENT)
+        }
         val resources = holder.itemView.resources
         val songs = artist.tracks.size
         holder.name.text = artist.name.ifEmpty { resources.getString(R.string.library_unknown_artist) }
         holder.count.text = resources.getQuantityString(R.plurals.library_song_count, songs, songs)
         holder.divider.visibility = if (position == artists.size - 1) View.INVISIBLE else View.VISIBLE
         thumbnails.bind(holder.art, artist.tracks.firstOrNull()?.uri.orEmpty())
+    }
+
+    private fun bindSkeleton(holder: Holder, position: Int) {
+        val context = holder.itemView.context
+        val density = context.resources.displayMetrics.density
+        holder.isSkeleton = true
+        thumbnails.clear(holder.art)
+        holder.art.setImageDrawable(SkeletonDrawable.tile(context, ROUND_CORNER_DP))
+        holder.name.text = ""
+        holder.count.text = ""
+        holder.name.background = SkeletonDrawable.bar(context)
+        holder.count.background = SkeletonDrawable.bar(context)
+        setWidth(holder.name, ((NAME_MIN_DP + (position * 31) % NAME_SPREAD_DP) * density).toInt())
+        setWidth(holder.count, (COUNT_WIDTH_DP * density).toInt())
+        holder.divider.visibility = if (position == SKELETON_COUNT - 1) View.INVISIBLE else View.VISIBLE
+    }
+
+    private fun setWidth(view: View, width: Int) {
+        val params = view.layoutParams
+        if (params.width != width) {
+            params.width = width
+            view.layoutParams = params
+        }
+    }
+
+    companion object {
+        private const val SKELETON_COUNT = 8
+        private const val ROUND_CORNER_DP = 28f
+        private const val NAME_MIN_DP = 120
+        private const val NAME_SPREAD_DP = 80
+        private const val COUNT_WIDTH_DP = 68
+
+        fun diff(previous: List<Artist>, next: List<Artist>): DiffUtil.DiffResult {
+            return DiffUtil.calculateDiff(object : DiffUtil.Callback() {
+                override fun getOldListSize(): Int = previous.size
+                override fun getNewListSize(): Int = next.size
+                override fun areItemsTheSame(oldPos: Int, newPos: Int): Boolean {
+                    return previous[oldPos].name.equals(next[newPos].name, ignoreCase = true)
+                }
+                override fun areContentsTheSame(oldPos: Int, newPos: Int): Boolean {
+                    return previous[oldPos] == next[newPos]
+                }
+            })
+        }
     }
 }

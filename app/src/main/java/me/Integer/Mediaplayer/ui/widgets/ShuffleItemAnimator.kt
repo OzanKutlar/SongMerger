@@ -22,7 +22,14 @@ import kotlin.random.Random
  */
 class ShuffleItemAnimator(private val list: RecyclerView) : DefaultItemAnimator() {
 
-    private class Flight(val holder: RecyclerView.ViewHolder, val endOffset: Float, val leaving: Boolean)
+    private class Flight(
+        val holder: RecyclerView.ViewHolder,
+        val endOffset: Float,
+        val leaving: Boolean,
+        val isActive: Boolean,
+        val panBonusMs: Long,
+        val panDown: Int
+    )
 
     private val pending = ArrayList<Flight>()
     private val running = ArrayList<RecyclerView.ViewHolder>()
@@ -32,6 +39,9 @@ class ShuffleItemAnimator(private val list: RecyclerView) : DefaultItemAnimator(
     private var previousFirstVisible = 0
     private var previousIndexOf: (Long) -> Int = NOWHERE
     private var nextIndexOf: (Long) -> Int = NOWHERE
+    private var activeUid = RecyclerView.NO_ID
+    private var activeOldTop = Int.MIN_VALUE
+    private var cameraDeltaPx = 0
 
     /**
      * Call right before notifying the adapter of a full reorder.
@@ -39,11 +49,24 @@ class ShuffleItemAnimator(private val list: RecyclerView) : DefaultItemAnimator(
      * @param previousFirstVisible the first row on screen before the reorder
      * @param previousIndexOf position of a stable id before the reorder, or -1
      * @param nextIndexOf position of a stable id after the reorder, or -1
+     * @param activeUid stable id of the playing track, or [RecyclerView.NO_ID]
+     * @param activeOldTop old screen top of the playing row, or [Int.MIN_VALUE] if unknown
+     * @param cameraDeltaPx signed scroll pan in pixels (positive when scrolling down)
      */
-    fun arm(previousFirstVisible: Int, previousIndexOf: (Long) -> Int, nextIndexOf: (Long) -> Int) {
+    fun arm(
+        previousFirstVisible: Int,
+        previousIndexOf: (Long) -> Int,
+        nextIndexOf: (Long) -> Int,
+        activeUid: Long = RecyclerView.NO_ID,
+        activeOldTop: Int = Int.MIN_VALUE,
+        cameraDeltaPx: Int = 0
+    ) {
         this.previousFirstVisible = maxOf(0, previousFirstVisible)
         this.previousIndexOf = previousIndexOf
         this.nextIndexOf = nextIndexOf
+        this.activeUid = activeUid
+        this.activeOldTop = activeOldTop
+        this.cameraDeltaPx = cameraDeltaPx
         armed = true
     }
 
@@ -52,6 +75,9 @@ class ShuffleItemAnimator(private val list: RecyclerView) : DefaultItemAnimator(
         armed = false
         previousIndexOf = NOWHERE
         nextIndexOf = NOWHERE
+        activeUid = RecyclerView.NO_ID
+        activeOldTop = Int.MIN_VALUE
+        cameraDeltaPx = 0
     }
 
     // ------------------------------------------------------------------ hooks
@@ -72,7 +98,7 @@ class ShuffleItemAnimator(private val list: RecyclerView) : DefaultItemAnimator(
     ): Boolean {
         if (!armed) return super.animateAppearance(viewHolder, preLayoutInfo, postLayoutInfo)
         if (preLayoutInfo != null) return slide(viewHolder, preLayoutInfo.top, postLayoutInfo.top)
-        return flyIn(viewHolder)
+        return flyIn(viewHolder, postLayoutInfo.top)
     }
 
     override fun animatePersistence(
@@ -108,16 +134,34 @@ class ShuffleItemAnimator(private val list: RecyclerView) : DefaultItemAnimator(
             return false
         }
         view.translationY = start
-        pending.add(Flight(holder, 0f, false))
+        val isActive = holder.itemId == activeUid && activeUid != RecyclerView.NO_ID
+        pending.add(Flight(holder, 0f, false, isActive, panDurationBonus(), panDirection()))
         return true
     }
 
     /** A row whose old seat was off screen: it enters from that side. */
-    private fun flyIn(holder: RecyclerView.ViewHolder): Boolean {
+    private fun flyIn(holder: RecyclerView.ViewHolder, postTop: Int): Boolean {
         val view = holder.itemView
         endAnimation(holder)
-        view.translationY = if (cameFromAbove(holder.itemId)) aboveOffset(holder) else belowOffset(holder)
-        pending.add(Flight(holder, 0f, false))
+        val isActive = holder.itemId == activeUid && activeUid != RecyclerView.NO_ID
+        if (isActive && activeOldTop != Int.MIN_VALUE) {
+            val start = (activeOldTop - postTop).toFloat()
+            if (start == 0f) {
+                dispatchAnimationFinished(holder)
+                return false
+            }
+            view.translationY = start
+            pending.add(Flight(holder, 0f, false, true, panDurationBonus(), panDirection()))
+            return true
+        }
+        val fromAbove = cameFromAbove(holder.itemId)
+        val extra = panTravelExtra()
+        view.translationY = if (fromAbove) {
+            aboveOffset(holder) - (if (cameraDeltaPx < 0) extra else 0f)
+        } else {
+            belowOffset(holder) + (if (cameraDeltaPx > 0) extra else 0f)
+        }
+        pending.add(Flight(holder, 0f, false, isActive, panDurationBonus(), panDirection()))
         return true
     }
 
@@ -127,9 +171,34 @@ class ShuffleItemAnimator(private val list: RecyclerView) : DefaultItemAnimator(
         val carried = view.translationY
         endAnimation(holder)
         view.translationY = carried
-        val end = if (headsAbove(holder.itemId)) aboveOffset(holder) else belowOffset(holder)
-        pending.add(Flight(holder, end, true))
+        val goAbove = headsAbove(holder.itemId)
+        val extra = panTravelExtra()
+        val end = if (goAbove) {
+            aboveOffset(holder) - (if (cameraDeltaPx > 0) extra else 0f)
+        } else {
+            belowOffset(holder) + (if (cameraDeltaPx < 0) extra else 0f)
+        }
+        pending.add(Flight(holder, end, true, false, panDurationBonus(), panDirection()))
         return true
+    }
+
+    private fun panDirection(): Int = when {
+        cameraDeltaPx > 0 -> 1
+        cameraDeltaPx < 0 -> -1
+        else -> 0
+    }
+
+    private fun panTravelExtra(): Float {
+        val height = list.height.takeIf { it > 0 } ?: return 0f
+        val delta = kotlin.math.abs(cameraDeltaPx)
+        if (delta <= height / 4) return 0f
+        return minOf(delta * 0.45f, height * 0.75f)
+    }
+
+    private fun panDurationBonus(): Long {
+        val height = list.height.takeIf { it > 0 } ?: return 0L
+        val ratio = (kotlin.math.abs(cameraDeltaPx).toFloat() / height).coerceIn(0f, 1.5f)
+        return (ratio * PAN_BONUS_MAX_MS).toLong()
     }
 
     private fun cameFromAbove(id: Long): Boolean {
@@ -161,25 +230,27 @@ class ShuffleItemAnimator(private val list: RecyclerView) : DefaultItemAnimator(
 
     override fun runPendingAnimations() {
         super.runPendingAnimations()
+        val showScrollbar = cameraDeltaPx != 0
         disarm()
         if (pending.isEmpty()) return
         val flights = ArrayList(pending)
         pending.clear()
+        if (showScrollbar) list.awakenScrollBars()
         for (flight in flights) launch(flight)
     }
 
     private fun launch(flight: Flight) {
         val holder = flight.holder
         running.add(holder)
-        val duration = if (flight.leaving) {
-            LEAVE_MIN_MS + random.nextLong(LEAVE_SPREAD_MS)
-        } else {
-            ARRIVE_MIN_MS + random.nextLong(ARRIVE_SPREAD_MS)
+        val duration = when {
+            flight.leaving -> LEAVE_MIN_MS + flight.panBonusMs / 2L + random.nextLong(LEAVE_SPREAD_MS)
+            flight.isActive -> ARRIVE_MIN_MS + flight.panBonusMs + ARRIVE_SPREAD_MS / 2L
+            else -> ARRIVE_MIN_MS + flight.panBonusMs + random.nextLong(ARRIVE_SPREAD_MS)
         }
-        val curve = if (flight.leaving) {
-            AccelerateInterpolator(LEAVE_ACCELERATION)
-        } else {
-            OvershootInterpolator(OVERSHOOT_MIN + random.nextFloat() * OVERSHOOT_SPREAD)
+        val curve = when {
+            flight.leaving -> AccelerateInterpolator(LEAVE_ACCELERATION)
+            flight.isActive -> OvershootInterpolator(OVERSHOOT_ACTIVE)
+            else -> OvershootInterpolator(OVERSHOOT_MIN + random.nextFloat() * OVERSHOOT_SPREAD)
         }
         holder.itemView.animate()
             .translationY(flight.endOffset)
@@ -241,7 +312,10 @@ class ShuffleItemAnimator(private val list: RecyclerView) : DefaultItemAnimator(
         const val LEAVE_SPREAD_MS = 160L
         const val LEAVE_ACCELERATION = 1.2f
 
+        const val PAN_BONUS_MAX_MS = 240L
+
         /** Overshoot tension; 0.5 to 0.8 overshoots by roughly one to two percent of the travel. */
+        const val OVERSHOOT_ACTIVE = 0.35f
         const val OVERSHOOT_MIN = 0.5f
         const val OVERSHOOT_SPREAD = 0.3f
 

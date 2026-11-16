@@ -41,7 +41,12 @@ class LibraryRepository private constructor(appContext: Context) {
     private val cancelled = AtomicBoolean(false)
     private var loadStarted = false
     private var uriIndex: Map<String, Track>? = null
+    private var artistsCache: List<Artist>? = null
+    private val artistsOfCache = HashMap<String, List<String>>()
+    private val displayArtistCache = HashMap<String, String>()
 
+    var isLoaded: Boolean = false
+        private set
     var tracks: List<Track> = emptyList()
         private set
     var scanState = ScanState(false, 0, 0)
@@ -65,7 +70,14 @@ class LibraryRepository private constructor(appContext: Context) {
         loadStarted = true
         worker.execute {
             val cached = index.load()
-            main.post { if (tracks.isEmpty() && cached.isNotEmpty()) publish(cached) }
+            main.post {
+                isLoaded = true
+                if (tracks.isEmpty() && cached.isNotEmpty()) {
+                    publish(cached)
+                } else {
+                    notifyListenersChanged()
+                }
+            }
         }
     }
 
@@ -94,7 +106,8 @@ class LibraryRepository private constructor(appContext: Context) {
         }
         if (result != null) index.save(result)
         main.post {
-            if (result != null) publish(result)
+            isLoaded = true
+            if (result != null) publish(result) else notifyListenersChanged()
             setScanState(ScanState(false, 0, 0))
         }
     }
@@ -103,7 +116,8 @@ class LibraryRepository private constructor(appContext: Context) {
 
     fun findTrack(trackUri: String): Track? {
         if (trackUri.isEmpty()) return null
-        return tracks.firstOrNull { it.uri == trackUri }
+        val index = uriIndex ?: tracks.associateBy { it.uri }.also { uriIndex = it }
+        return index[trackUri]
     }
 
     fun isFavorite(trackUri: String): Boolean {
@@ -112,7 +126,7 @@ class LibraryRepository private constructor(appContext: Context) {
 
     fun toggleFavorite(trackUri: String): Boolean {
         val state = favorites.toggle(trackUri)
-        notifyArtistRulesChanged()
+        notifyListenersChanged()
         return state
     }
 
@@ -136,30 +150,46 @@ class LibraryRepository private constructor(appContext: Context) {
 
     /** The individual artists of a song: the manual split if there is one, else automatic. */
     fun artistsOf(track: Track): List<String> {
-        return overrides.get(track.uri) ?: ArtistSplitter.split(track.artistTag, settings.artistSeparator)
+        return artistsOfCache.getOrPut(track.uri) {
+            overrides.get(track.uri) ?: ArtistSplitter.split(track.artistTag, settings.artistSeparator)
+        }
     }
 
     /** The artists of a song as one display line; empty when unknown. */
     fun displayArtist(track: Track): String {
-        return ArtistSplitter.join(artistsOf(track), settings.artistSeparator)
+        return displayArtistCache.getOrPut(track.uri) {
+            ArtistSplitter.join(artistsOf(track), settings.artistSeparator)
+        }
     }
 
     /** Every artist with their songs. A song with several artists is listed under each. */
     fun artists(): List<Artist> {
-        return ArtistGrouper.group(tracks) { artistsOf(it) }
+        return artistsCache ?: ArtistGrouper.group(tracks) { artistsOf(it) }.also { artistsCache = it }
     }
 
     /** Call after changing the separator, favorites or a manual split, so the screens update. */
     fun notifyArtistRulesChanged() {
-        for (listener in ArrayList(listeners)) listener.onLibraryChanged()
+        invalidateArtistCaches()
+        notifyListenersChanged()
     }
 
     // ------------------------------------------------------------------ helpers
 
+    private fun invalidateArtistCaches() {
+        artistsCache = null
+        artistsOfCache.clear()
+        displayArtistCache.clear()
+    }
+
+    private fun notifyListenersChanged() {
+        for (listener in ArrayList(listeners)) listener.onLibraryChanged()
+    }
+
     private fun publish(next: List<Track>) {
         tracks = next
         uriIndex = null
-        for (listener in ArrayList(listeners)) listener.onLibraryChanged()
+        invalidateArtistCaches()
+        notifyListenersChanged()
     }
 
     private fun setScanState(next: ScanState) {

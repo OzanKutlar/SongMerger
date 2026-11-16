@@ -14,6 +14,7 @@ import android.util.LruCache
 import android.widget.ImageView
 import me.Integer.Mediaplayer.library.EmbeddedArt
 import me.Integer.Mediaplayer.library.Playlist
+import me.Integer.Mediaplayer.ui.widgets.SkeletonDrawable
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.FileOutputStream
@@ -53,7 +54,7 @@ class PlaylistCoverLoader private constructor(context: Context) {
 
     // ------------------------------------------------------------------ public API
 
-    /** Shows the cover of [playlist] in [view], or nothing (the placeholder behind it shows). */
+    /** Shows the cover of [playlist] in [view], a skeleton while rendering, or nothing when missing. */
     fun bind(view: ImageView, playlist: Playlist?) {
         val slot = view.tag as? Slot ?: Slot().also { view.tag = it }
         val key = if (playlist == null) "" else keyOf(playlist)
@@ -61,9 +62,16 @@ class PlaylistCoverLoader private constructor(context: Context) {
         slot.key = key
         view.animate().cancel()
         view.alpha = 1f
-        val cached = if (key.isEmpty()) null else cache.get(key)
-        view.setImageBitmap(cached)
-        if (playlist == null || cached != null || key in missing) return
+        if (playlist == null || key.isEmpty() || key in missing) {
+            view.setImageDrawable(null)
+            return
+        }
+        val cached = cache.get(key)
+        if (cached != null) {
+            view.setImageBitmap(cached)
+            return
+        }
+        view.setImageDrawable(SkeletonDrawable.tile(view.context))
         val target = WeakReference(view)
         executor.execute {
             if (slot.key == key) {
@@ -92,10 +100,12 @@ class PlaylistCoverLoader private constructor(context: Context) {
             missing.add(key)
         }
         val target = view.get() ?: return
-        if (art == null || slot.key != key) return
+        if (slot.key != key) return
+        if (art == null) {
+            target.setImageDrawable(null)
+            return
+        }
         target.setImageBitmap(art)
-        target.alpha = 0f
-        target.animate().alpha(1f).setDuration(FADE_MS).start()
     }
 
     /** Changes whenever the picture would: cover choice, or the songs the grid is made of. */
@@ -270,7 +280,6 @@ class PlaylistCoverLoader private constructor(context: Context) {
         private const val MAX_IMPORT_BYTES = 24 * 1024 * 1024
         private const val BUFFER_BYTES = 16 * 1024
         private const val MAX_READS = 4096
-        private const val FADE_MS = 180L
 
         @Volatile
         private var instance: PlaylistCoverLoader? = null

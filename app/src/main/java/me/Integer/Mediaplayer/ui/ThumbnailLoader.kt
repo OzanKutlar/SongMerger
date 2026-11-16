@@ -9,6 +9,7 @@ import android.util.Log
 import android.util.LruCache
 import android.widget.ImageView
 import me.Integer.Mediaplayer.library.EmbeddedArt
+import me.Integer.Mediaplayer.ui.widgets.SkeletonDrawable
 import java.lang.ref.WeakReference
 import java.util.concurrent.ArrayBlockingQueue
 import java.util.concurrent.ThreadPoolExecutor
@@ -56,15 +57,31 @@ class ThumbnailLoader private constructor(context: Context) {
         ThreadPoolExecutor.DiscardOldestPolicy()
     )
 
-    /** Shows the cover of [trackUri] in [view], or nothing (the placeholder behind it shows). */
+    /** Cancels any pending load on [view] and clears its image. */
+    fun clear(view: ImageView) {
+        val slot = view.tag as? Slot
+        if (slot != null) slot.uri = ""
+        view.animate().cancel()
+        view.alpha = 1f
+        view.setImageDrawable(null)
+    }
+
+    /** Shows the cover of [trackUri] in [view], a skeleton while decoding, or nothing when missing. */
     fun bind(view: ImageView, trackUri: String) {
         val slot = view.tag as? Slot ?: Slot().also { view.tag = it }
         slot.uri = trackUri
         view.animate().cancel()
         view.alpha = 1f
-        val cached = if (trackUri.isEmpty()) null else cache.get(trackUri)
-        view.setImageBitmap(cached)
-        if (cached != null || trackUri.isEmpty() || trackUri in missing) return
+        if (trackUri.isEmpty() || trackUri in missing) {
+            view.setImageDrawable(null)
+            return
+        }
+        val cached = cache.get(trackUri)
+        if (cached != null) {
+            view.setImageBitmap(cached)
+            return
+        }
+        view.setImageDrawable(SkeletonDrawable.tile(view.context))
         executor.execute(Task(slot, trackUri, WeakReference(view)))
     }
 
@@ -98,10 +115,12 @@ class ThumbnailLoader private constructor(context: Context) {
             missing.add(task.uri)
         }
         val view = task.view.get() ?: return
-        if (art == null || task.slot.uri != task.uri) return
+        if (task.slot.uri != task.uri) return
+        if (art == null) {
+            view.setImageDrawable(null)
+            return
+        }
         view.setImageBitmap(art)
-        view.alpha = 0f
-        view.animate().alpha(1f).setDuration(FADE_MS).start()
     }
 
     companion object {
@@ -112,7 +131,6 @@ class ThumbnailLoader private constructor(context: Context) {
         private const val WORKERS = 2
         private const val MAX_QUEUED = 64
         private const val MAX_REMEMBERED_MISSES = 5000
-        private const val FADE_MS = 150L
 
         @Volatile
         private var instance: ThumbnailLoader? = null

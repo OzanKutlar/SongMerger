@@ -6,6 +6,7 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.ImageView
 import android.widget.TextView
+import androidx.recyclerview.widget.DiffUtil
 import androidx.recyclerview.widget.RecyclerView
 import me.Integer.Mediaplayer.R
 import me.Integer.Mediaplayer.library.Playlist
@@ -28,10 +29,32 @@ class PlaylistAdapter(
 
     private var playlists: List<Playlist> = emptyList()
 
+    fun rows(): List<Playlist> = playlists
+
     @SuppressLint("NotifyDataSetChanged")
-    fun submit(next: List<Playlist>) {
+    fun submit(next: List<Playlist>, diff: DiffUtil.DiffResult? = null) {
+        val had = playlists.isNotEmpty()
         playlists = next
-        notifyDataSetChanged()
+        if (diff != null && had && next.isNotEmpty()) {
+            diff.dispatchUpdatesTo(this)
+        } else {
+            notifyDataSetChanged()
+        }
+    }
+
+    companion object {
+        fun diff(previous: List<Playlist>, next: List<Playlist>): DiffUtil.DiffResult {
+            return DiffUtil.calculateDiff(object : DiffUtil.Callback() {
+                override fun getOldListSize(): Int = previous.size
+                override fun getNewListSize(): Int = next.size
+                override fun areItemsTheSame(oldPos: Int, newPos: Int): Boolean {
+                    return previous[oldPos].id == next[newPos].id
+                }
+                override fun areContentsTheSame(oldPos: Int, newPos: Int): Boolean {
+                    return previous[oldPos] == next[newPos]
+                }
+            })
+        }
     }
 
     override fun getItemCount(): Int {
