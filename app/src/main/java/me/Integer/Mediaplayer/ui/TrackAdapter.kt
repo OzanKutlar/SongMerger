@@ -62,6 +62,20 @@ class TrackAdapter(
         return tracks.size
     }
 
+    /** The rows as shown right now, including moves made by dragging. */
+    fun rows(): List<Track> {
+        return tracks
+    }
+
+    /** Moves one row while it is being dragged; the caller stores the new order afterwards. */
+    fun moveLocal(from: Int, to: Int) {
+        if (from !in tracks.indices || to !in tracks.indices || from == to) return
+        val reordered = ArrayList(tracks)
+        reordered.add(to, reordered.removeAt(from))
+        tracks = reordered
+        notifyItemMoved(from, to)
+    }
+
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): Holder {
         val view = LayoutInflater.from(parent.context).inflate(R.layout.item_track, parent, false)
         val holder = Holder(view)

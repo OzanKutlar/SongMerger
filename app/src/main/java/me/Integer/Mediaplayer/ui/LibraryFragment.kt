@@ -35,12 +35,15 @@ class LibraryFragment : Fragment(R.layout.fragment_library), LibraryRepository.L
     private lateinit var navigator: Navigator
     private lateinit var trackAdapter: TrackAdapter
     private lateinit var artistAdapter: ArtistAdapter
+    private lateinit var playlistAdapter: PlaylistAdapter
     private lateinit var list: RecyclerView
     private lateinit var emptyView: TextView
     private lateinit var scanView: TextView
     private lateinit var songsTab: TextView
     private lateinit var favoritesTab: TextView
     private lateinit var artistsTab: TextView
+    private lateinit var playlistsTab: TextView
+    private lateinit var addButton: View
     private lateinit var searchBar: View
     private lateinit var searchInput: EditText
     private lateinit var sortButton: View
@@ -112,6 +115,8 @@ class LibraryFragment : Fragment(R.layout.fragment_library), LibraryRepository.L
         songsTab = view.findViewById(R.id.libraryTabSongs)
         favoritesTab = view.findViewById(R.id.libraryTabFavorites)
         artistsTab = view.findViewById(R.id.libraryTabArtists)
+        playlistsTab = view.findViewById(R.id.libraryTabPlaylists)
+        addButton = view.findViewById(R.id.libraryAdd)
         searchBar = view.findViewById(R.id.librarySearchBar)
         searchInput = view.findViewById(R.id.librarySearch)
         sortButton = view.findViewById(R.id.librarySort)
@@ -132,6 +137,11 @@ class LibraryFragment : Fragment(R.layout.fragment_library), LibraryRepository.L
             onMenu = { track, anchor -> TrackMenu.show(anchor, track, host, repository) }
         )
         artistAdapter = ArtistAdapter(thumbnails) { artist -> navigator.openArtist(artist.name) }
+        playlistAdapter = PlaylistAdapter(
+            covers = PlaylistCoverLoader.get(requireContext()),
+            onClick = { playlist -> navigator.openPlaylist(playlist.id) },
+            onMenu = { playlist, anchor -> PlaylistDialogs.showRowMenu(anchor, playlist, host, repository) }
+        )
     }
 
     private fun wireHeader(view: View) {
@@ -145,10 +155,15 @@ class LibraryFragment : Fragment(R.layout.fragment_library), LibraryRepository.L
         songsTab.setOnClickListener { selectTab(TAB_SONGS) }
         favoritesTab.setOnClickListener { selectTab(TAB_FAVORITES) }
         artistsTab.setOnClickListener { selectTab(TAB_ARTISTS) }
+        playlistsTab.setOnClickListener { selectTab(TAB_PLAYLISTS) }
     }
 
     private fun wireCard() {
         sortButton.setOnClickListener { showSortMenu(it) }
+        PressFeedback.attach(addButton, null, ROUND_PRESS_SCALE)
+        addButton.setOnClickListener {
+            PlaylistDialogs.create(requireContext(), repository) { created -> navigator.openPlaylist(created.id) }
+        }
         PressFeedback.attach(shuffleButton, null, ROUND_PRESS_SCALE)
         PressFeedback.attach(playAllButton, null, ROUND_PRESS_SCALE)
         shuffleButton.setOnClickListener { host.playAll(visibleTracks, true) }
@@ -235,6 +250,24 @@ class LibraryFragment : Fragment(R.layout.fragment_library), LibraryRepository.L
         activeTab = tab
         refresh()
         replayRows()
+        revealTab(tabView(tab))
+    }
+
+    private fun tabView(tab: Int): TextView {
+        return when (tab) {
+            TAB_FAVORITES -> favoritesTab
+            TAB_PLAYLISTS -> playlistsTab
+            TAB_ARTISTS -> artistsTab
+            else -> songsTab
+        }
+    }
+
+    /** Scrolls the tab row so the chosen tab is in view once it has grown. */
+    private fun revealTab(tab: TextView) {
+        tab.postDelayed({
+            val scroller = tab.parent?.parent as? android.widget.HorizontalScrollView
+            scroller?.smoothScrollTo(maxOf(0, tab.left - tab.paddingLeft), 0)
+        }, TAB_ANIMATION_MS)
     }
 
     /** New rows rise in one after another instead of popping in. */
@@ -250,6 +283,7 @@ class LibraryFragment : Fragment(R.layout.fragment_library), LibraryRepository.L
         val shown = when (activeTab) {
             TAB_FAVORITES -> showSongs(repository.favoriteTracks(), needle)
             TAB_ARTISTS -> showArtists(needle)
+            TAB_PLAYLISTS -> showPlaylists(needle)
             else -> showSongs(repository.tracks, needle)
         }
         if (lastRowCount == 0 && shown > 0) list.scheduleLayoutAnimation()
@@ -283,10 +317,20 @@ class LibraryFragment : Fragment(R.layout.fragment_library), LibraryRepository.L
         return sorted.size
     }
 
+    private fun showPlaylists(needle: String): Int {
+        val playlists = repository.playlists.all().filter { playlist ->
+            needle.isEmpty() || playlist.name.lowercase(Locale.ROOT).contains(needle)
+        }
+        playlistAdapter.submit(playlists)
+        if (list.adapter !== playlistAdapter) list.adapter = playlistAdapter
+        return playlists.size
+    }
+
     private fun renderTabs() {
         styleTab(songsTab, activeTab == TAB_SONGS)
         styleTab(favoritesTab, activeTab == TAB_FAVORITES)
         styleTab(artistsTab, activeTab == TAB_ARTISTS)
+        styleTab(playlistsTab, activeTab == TAB_PLAYLISTS)
         tabsStyled = true
     }
 
@@ -322,16 +366,20 @@ class LibraryFragment : Fragment(R.layout.fragment_library), LibraryRepository.L
     }
 
     private fun renderCardHeader() {
-        val showingSongs = activeTab != TAB_ARTISTS
+        val showingSongs = activeTab == TAB_SONGS || activeTab == TAB_FAVORITES
+        val showingPlaylists = activeTab == TAB_PLAYLISTS
         val buttons = if (showingSongs) View.VISIBLE else View.GONE
         shuffleButton.visibility = buttons
         playAllButton.visibility = buttons
-        sortIcon.visibility = View.VISIBLE
-        sortButton.isClickable = true
-        sortLabel.text = if (showingSongs) {
-            getString(TRACK_SORT_LABELS[repository.settings.trackSort])
-        } else {
-            getString(ARTIST_SORT_LABELS[repository.settings.artistSort])
+        addButton.visibility = if (showingPlaylists) View.VISIBLE else View.GONE
+        sortIcon.visibility = if (showingPlaylists) View.GONE else View.VISIBLE
+        sortButton.isClickable = !showingPlaylists
+        val playlistCount = if (showingPlaylists) repository.playlists.all().size else 0
+        sortLabel.text = when {
+            showingSongs -> getString(TRACK_SORT_LABELS[repository.settings.trackSort])
+            showingPlaylists ->
+                resources.getQuantityString(R.plurals.library_playlist_count, playlistCount, playlistCount)
+            else -> getString(ARTIST_SORT_LABELS[repository.settings.artistSort])
         }
         val usable = visibleTracks.isNotEmpty()
         shuffleButton.isEnabled = usable
@@ -347,6 +395,7 @@ class LibraryFragment : Fragment(R.layout.fragment_library), LibraryRepository.L
             repository.tracks.isEmpty() -> R.string.library_empty
             query.isNotBlank() -> R.string.library_no_match
             activeTab == TAB_FAVORITES -> R.string.library_favorites_empty
+            activeTab == TAB_PLAYLISTS -> R.string.library_playlists_empty
             else -> R.string.library_no_match
         }
         emptyView.setText(message)
@@ -371,6 +420,7 @@ class LibraryFragment : Fragment(R.layout.fragment_library), LibraryRepository.L
         const val TAB_SONGS = 0
         const val TAB_FAVORITES = 1
         const val TAB_ARTISTS = 2
+        const val TAB_PLAYLISTS = 3
 
         const val ID_QUEUE = 1
         const val ID_RESCAN = 2

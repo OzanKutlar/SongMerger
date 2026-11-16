@@ -118,10 +118,15 @@
         </FrameLayout>
     </LinearLayout>
 
-    <!-- Tabs: sizes and colours are animated in code -->
-    <LinearLayout
+    <!-- Tabs: sizes and colours are animated in code; the row scrolls when it is too wide -->
+    <HorizontalScrollView
         android:layout_width="match_parent"
         android:layout_height="60dp"
+        android:scrollbars="none">
+
+    <LinearLayout
+        android:layout_width="wrap_content"
+        android:layout_height="match_parent"
         android:gravity="bottom"
         android:orientation="horizontal"
         android:paddingStart="12dp"
@@ -154,6 +159,19 @@
             android:textSize="17sp" />
 
         <TextView
+            android:id="@+id/libraryTabPlaylists"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:clickable="true"
+            android:focusable="true"
+            android:paddingStart="12dp"
+            android:paddingEnd="12dp"
+            android:paddingBottom="6dp"
+            android:text="@string/library_tab_playlists"
+            android:textColor="@color/text_muted"
+            android:textSize="17sp" />
+
+        <TextView
             android:id="@+id/libraryTabArtists"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
@@ -166,6 +184,7 @@
             android:textColor="@color/text_muted"
             android:textSize="17sp" />
     </LinearLayout>
+    </HorizontalScrollView>
 
     <!-- The list card -->
     <LinearLayout
@@ -214,6 +233,25 @@
                     android:textColor="#C7C7CC"
                     android:textSize="16sp" />
             </LinearLayout>
+
+            <FrameLayout
+                android:id="@+id/libraryAdd"
+                android:layout_width="52dp"
+                android:layout_height="52dp"
+                android:background="@drawable/player_round_button_bg"
+                android:clickable="true"
+                android:contentDescription="@string/playlist_new"
+                android:focusable="true"
+                android:visibility="gone">
+
+                <ImageView
+                    android:layout_width="26dp"
+                    android:layout_height="26dp"
+                    android:layout_gravity="center"
+                    android:contentDescription="@null"
+                    android:src="@drawable/player_ic_add"
+                    android:tint="#F5F5F7" />
+            </FrameLayout>
 
             <FrameLayout
                 android:id="@+id/libraryShuffle"

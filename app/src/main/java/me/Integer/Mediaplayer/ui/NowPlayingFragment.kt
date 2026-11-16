@@ -71,6 +71,7 @@ class NowPlayingFragment : Fragment(R.layout.fragment_now_playing), PlayerHost.L
         popup.menu.add(0, ID_VIEW_ALBUM, 0, R.string.menu_view_album)
         popup.menu.add(0, ID_VIEW_ARTIST, 1, R.string.menu_view_artist)
         popup.menu.add(0, ID_CURRENT_QUEUE, 2, R.string.menu_current_queue)
+        popup.menu.add(0, ID_ADD_PLAYLIST, 3, R.string.menu_add_playlist)
         popup.menu.add(0, ID_SPLIT_ARTISTS, 3, R.string.menu_split_artists)
         popup.menu.add(0, ID_TRACK_DETAILS, 4, R.string.menu_track_details)
         popup.setOnMenuItemClickListener { item ->
@@ -78,6 +79,7 @@ class NowPlayingFragment : Fragment(R.layout.fragment_now_playing), PlayerHost.L
                 ID_VIEW_ALBUM -> openAlbumForCurrent()
                 ID_VIEW_ARTIST -> openArtistForCurrent()
                 ID_CURRENT_QUEUE -> navigator.openQueue()
+                ID_ADD_PLAYLIST -> currentTrack()?.let { PlaylistDialogs.addTrack(requireContext(), repository, it) }
                 ID_SPLIT_ARTISTS -> currentTrack()?.let { SplitArtistsDialog.show(requireContext(), repository, it) }
                 ID_TRACK_DETAILS -> currentTrack()?.let { TrackDetailsDialog.show(requireContext(), repository, it) }
             }
@@ -139,5 +141,6 @@ class NowPlayingFragment : Fragment(R.layout.fragment_now_playing), PlayerHost.L
         const val ID_CURRENT_QUEUE = 3
         const val ID_SPLIT_ARTISTS = 4
         const val ID_TRACK_DETAILS = 5
+        const val ID_ADD_PLAYLIST = 6
     }
 }

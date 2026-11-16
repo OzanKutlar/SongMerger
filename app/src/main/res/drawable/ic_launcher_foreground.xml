@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A vinyl record with a green label and a play triangle, inside the adaptive icon safe zone. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Record -->
+    <path
+        android:fillColor="#FF1B1F27"
+        android:pathData="M24,54a30,30 0,1 0,60 0a30,30 0,1 0,-60 0"
+        android:strokeColor="#FF00E676"
+        android:strokeWidth="1.6" />
+    <!-- Grooves -->
+    <path
+        android:pathData="M28,54a26,26 0,1 0,52 0a26,26 0,1 0,-52 0"
+        android:strokeColor="#FF2C323E"
+        android:strokeWidth="0.9" />
+    <path
+        android:pathData="M32.5,54a21.5,21.5 0,1 0,43 0a21.5,21.5 0,1 0,-43 0"
+        android:strokeColor="#FF2C323E"
+        android:strokeWidth="0.9" />
+    <path
+        android:pathData="M37,54a17,17 0,1 0,34 0a17,17 0,1 0,-34 0"
+        android:strokeColor="#FF2C323E"
+        android:strokeWidth="0.9" />
+    <!-- Glare -->
+    <path
+        android:pathData="M30.44,43A26,26 0,0 1,43 30.44"
+        android:strokeAlpha="0.3"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeLineCap="round"
+        android:strokeWidth="2.2" />
+    <path
+        android:pathData="M77.56,65A26,26 0,0 1,65 77.56"
+        android:strokeAlpha="0.3"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeLineCap="round"
+        android:strokeWidth="2.2" />
+    <path
+        android:pathData="M35.87,45.55A20,20 0,0 1,45.55 35.87"
+        android:strokeAlpha="0.18"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeLineCap="round"
+        android:strokeWidth="1.6" />
+    <path
+        android:pathData="M72.13,62.45A20,20 0,0 1,62.45 72.13"
+        android:strokeAlpha="0.18"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeLineCap="round"
+        android:strokeWidth="1.6" />
+    <!-- Label -->
+    <path
+        android:fillColor="#FF00E676"
+        android:pathData="M42,54a12,12 0,1 0,24 0a12,12 0,1 0,-24 0" />
+    <!-- Play -->
+    <path
+        android:fillColor="#FF0B0E14"
+        android:pathData="M50,47.5L50,60.5L61,54Z" />
+</vector>

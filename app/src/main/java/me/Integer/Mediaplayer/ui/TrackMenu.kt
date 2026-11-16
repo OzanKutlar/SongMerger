@@ -15,6 +15,7 @@ object TrackMenu {
     private const val ID_FAVORITE = 3
     private const val ID_SPLIT_ARTISTS = 4
     private const val ID_DETAILS = 5
+    private const val ID_PLAYLIST = 6
 
     fun show(anchor: View, track: Track, host: PlayerHost, repository: LibraryRepository) {
         val context = anchor.context
@@ -28,6 +29,7 @@ object TrackMenu {
             2,
             if (isFav) R.string.menu_remove_favorite else R.string.menu_add_favorite
         )
+        popup.menu.add(0, ID_PLAYLIST, 2, R.string.menu_add_playlist)
         popup.menu.add(0, ID_SPLIT_ARTISTS, 3, R.string.menu_split_artists)
         popup.menu.add(0, ID_DETAILS, 4, R.string.menu_track_details)
         popup.setOnMenuItemClickListener { item ->
@@ -42,6 +44,7 @@ object TrackMenu {
                     ).show()
                 }
                 ID_FAVORITE -> repository.toggleFavorite(track.uri)
+                ID_PLAYLIST -> PlaylistDialogs.addTrack(context, repository, track)
                 ID_SPLIT_ARTISTS -> SplitArtistsDialog.show(context, repository, track)
                 ID_DETAILS -> TrackDetailsDialog.show(context, repository, track)
             }

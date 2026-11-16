@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Single-colour version of the logo for themed icons. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:pathData="M26,54a28,28 0,1 0,56 0a28,28 0,1 0,-56 0"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="3" />
+    <path
+        android:pathData="M34,54a20,20 0,1 0,40 0a20,20 0,1 0,-40 0"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="1.4" />
+    <!-- Label with the play triangle cut out -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:fillType="evenOdd"
+        android:pathData="M42,54a12,12 0,1 0,24 0a12,12 0,1 0,-24 0M50,47.5L50,60.5L61,54Z" />
+</vector>

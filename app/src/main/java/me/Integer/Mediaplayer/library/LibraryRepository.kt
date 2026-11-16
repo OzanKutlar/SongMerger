@@ -31,6 +31,7 @@ class LibraryRepository private constructor(appContext: Context) {
     val folders = MusicFolderStore(appContext)
     val overrides = ArtistOverrides(appContext)
     val favorites = FavoritesStore(appContext)
+    val playlists = PlaylistStore(appContext) { notifyArtistRulesChanged() }
 
     private val index = LibraryIndex(appContext)
     private val scanner = LibraryScanner(appContext, TagReader(appContext))
@@ -39,6 +40,7 @@ class LibraryRepository private constructor(appContext: Context) {
     private val listeners = ArrayList<Listener>()
     private val cancelled = AtomicBoolean(false)
     private var loadStarted = false
+    private var uriIndex: Map<String, Track>? = null
 
     var tracks: List<Track> = emptyList()
         private set
@@ -124,6 +126,12 @@ class LibraryRepository private constructor(appContext: Context) {
         return tracks.filter { it.album.equals(album, ignoreCase = true) }
     }
 
+    /** The library songs for [uris], in that order. Songs no longer in the library are skipped. */
+    fun resolveTracks(uris: List<String>): List<Track> {
+        val index = uriIndex ?: tracks.associateBy { it.uri }.also { uriIndex = it }
+        return uris.mapNotNull { index[it] }
+    }
+
     // ------------------------------------------------------------------ artists
 
     /** The individual artists of a song: the manual split if there is one, else automatic. */
@@ -150,6 +158,7 @@ class LibraryRepository private constructor(appContext: Context) {
 
     private fun publish(next: List<Track>) {
         tracks = next
+        uriIndex = null
         for (listener in ArrayList(listeners)) listener.onLibraryChanged()
     }
 

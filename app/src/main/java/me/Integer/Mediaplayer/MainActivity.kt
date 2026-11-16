@@ -24,6 +24,7 @@ import me.Integer.Mediaplayer.ui.MiniPlayerBar
 import me.Integer.Mediaplayer.ui.Navigator
 import me.Integer.Mediaplayer.ui.NowPlayingFragment
 import me.Integer.Mediaplayer.ui.PlayerHost
+import me.Integer.Mediaplayer.ui.PlaylistFragment
 import me.Integer.Mediaplayer.ui.QueueFragment
 import me.Integer.Mediaplayer.ui.SettingsFragment
 import kotlin.math.roundToInt
@@ -168,6 +169,10 @@ class MainActivity : AppCompatActivity(), PlayerHost, Navigator, NowPlayingListe
         open(KEY_ALBUM + albumName.lowercase(), false) { AlbumFragment.create(albumName) }
     }
 
+    override fun openPlaylist(playlistId: Long) {
+        open(KEY_PLAYLIST + playlistId, false) { PlaylistFragment.create(playlistId) }
+    }
+
     override fun openQueue() {
         open(KEY_QUEUE, false) { QueueFragment() }
     }
@@ -226,5 +231,6 @@ class MainActivity : AppCompatActivity(), PlayerHost, Navigator, NowPlayingListe
         const val KEY_SETTINGS = "settings"
         const val KEY_ARTIST = "artist:"
         const val KEY_ALBUM = "album:"
+        const val KEY_PLAYLIST = "playlist:"
     }
 }

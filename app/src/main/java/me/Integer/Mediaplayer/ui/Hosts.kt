@@ -41,6 +41,8 @@ interface Navigator {
 
     fun openAlbum(albumName: String)
 
+    fun openPlaylist(playlistId: Long)
+
     fun openQueue()
 
     fun openSettings()

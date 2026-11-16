@@ -11,6 +11,7 @@
     <string name="library_tab_songs">Tracks</string>
     <string name="library_tab_favorites">Favorites</string>
     <string name="library_tab_artists">Artists</string>
+    <string name="library_tab_playlists">Playlists</string>
     <string name="library_sort">Sort order</string>
     <string name="library_shuffle_all">Shuffle all</string>
     <string name="library_play_all">Play all</string>
@@ -36,6 +37,11 @@
         <item quantity="other">%1$d artists</item>
     </plurals>
     <string name="artist_songs_label">Songs</string>
+    <plurals name="library_playlist_count">
+        <item quantity="one">%1$d playlist</item>
+        <item quantity="other">%1$d playlists</item>
+    </plurals>
+    <string name="library_playlists_empty">No playlists yet. Tap + to create one.</string>
 
     <!-- Song & Player menus -->
     <string name="menu_more">More options</string>
@@ -72,6 +78,30 @@
     <string name="details_size">File size</string>
     <string name="details_modified">Modified</string>
     <string name="details_location">Location on disk</string>
+
+    <!-- Playlists -->
+    <string name="menu_add_playlist">Add to playlist</string>
+    <string name="playlist_new">New playlist</string>
+    <string name="playlist_new_item">New playlist&#8230;</string>
+    <string name="playlist_name_hint">Playlist name</string>
+    <string name="playlist_name_invalid">Enter a name for the playlist</string>
+    <string name="playlist_added">Added to %1$s</string>
+    <string name="playlist_already">Already in %1$s</string>
+    <string name="playlist_rename">Rename</string>
+    <string name="playlist_delete">Delete playlist</string>
+    <string name="playlist_delete_message">Delete %1$s? The songs stay in your library.</string>
+    <string name="playlist_change_cover">Change cover</string>
+    <string name="playlist_cover_auto">Automatic (first four songs)</string>
+    <string name="playlist_cover_song">Cover of a song&#8230;</string>
+    <string name="playlist_cover_image">Image from storage&#8230;</string>
+    <string name="playlist_cover_choose_song">Choose a song</string>
+    <string name="playlist_cover_failed">Could not use that image</string>
+    <string name="playlist_cover_description">Playlist cover. Tap to change it</string>
+    <string name="playlist_use_cover">Use cover for playlist</string>
+    <string name="playlist_remove_track">Remove from playlist</string>
+    <string name="playlist_no_songs">This playlist has no songs yet</string>
+    <string name="playlist_empty">This playlist is empty. Use &#8942; &#8594; Add to playlist on any song.</string>
+    <string name="playlist_hint">Tap the cover to change it. Hold a song to reorder.</string>
 
     <!-- Queue -->
     <string name="queue_title">Current queue</string>
