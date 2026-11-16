@@ -5,9 +5,15 @@ import android.os.Handler
 import android.os.Looper
 import android.util.Log
 import java.io.IOException
+import java.io.InterruptedIOException
 import java.security.MessageDigest
 import java.security.NoSuchAlgorithmException
+import java.util.concurrent.Callable
+import java.util.concurrent.ExecutionException
+import java.util.concurrent.ExecutorCompletionService
 import java.util.concurrent.Executors
+import java.util.concurrent.Future
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
@@ -19,7 +25,7 @@ import java.util.concurrent.atomic.AtomicBoolean
  */
 class AiMashupGenerator private constructor(context: Context) {
 
-    enum class Phase { IDLE, CONNECTING, ANALYSING, ROUTING, COMPLETED, FAILED }
+    enum class Phase { IDLE, CONNECTING, UPLOADING, ANALYSING, ROUTING, COMPLETED, FAILED }
 
     enum class Failure { NONE, NO_SERVER, TOO_FEW_SONGS, SERVER, NO_ROUTES }
 
@@ -38,10 +44,13 @@ class AiMashupGenerator private constructor(context: Context) {
         val skipped: Int = 0,
         val mixes: List<Mix> = emptyList(),
         val failure: Failure = Failure.NONE,
-        val detail: String = ""
+        val detail: String = "",
+        /** Where the server analyses songs, such as cuda:0 NVIDIA GeForce RTX 5060 Ti. */
+        val device: String = ""
     ) {
         val isRunning: Boolean
-            get() = phase == Phase.CONNECTING || phase == Phase.ANALYSING || phase == Phase.ROUTING
+            get() = phase == Phase.CONNECTING || phase == Phase.UPLOADING ||
+                phase == Phase.ANALYSING || phase == Phase.ROUTING
     }
 
     fun interface Listener {
@@ -129,16 +138,22 @@ class AiMashupGenerator private constructor(context: Context) {
         items: List<AiMashupClient.RemoteTrack>
     ) {
         try {
-            client.ping()
+            val device = client.ping().device
             val missing = client.missing(items)
-            val ready = analyse(run, cancelled, client, items, missing)
+            val toSend = items.filter { it.id in missing }
+            val notSent = upload(run, cancelled, client, toSend, device) ?: return
             if (cancelled.get()) return
+            val sent = toSend.filter { it.id !in notSent }
+            if (sent.isNotEmpty()) analyseOnServer(run, cancelled, client, sent, device, notSent.size)
+            if (cancelled.get()) return
+            val unusable: Set<String> = if (toSend.isEmpty()) emptySet() else client.missing(items)
+            val ready = items.filter { it.id !in unusable }
             val skipped = items.size - ready.size
             if (ready.size < MIN_TRACKS) {
                 post(run, State(Phase.FAILED, skipped = skipped, failure = Failure.TOO_FEW_SONGS))
                 return
             }
-            post(run, State(Phase.ROUTING, skipped = skipped))
+            post(run, State(Phase.ROUTING, skipped = skipped, device = device))
             val remote = client.route(ready.map { it.id }, PLAYLIST_COUNT, TRACKS_PER_PLAYLIST)
             post(run, finished(remote, ready, skipped))
         } catch (e: IOException) {
@@ -152,33 +167,109 @@ class AiMashupGenerator private constructor(context: Context) {
     }
 
     /**
-     * Sends every song the server is [missing]. A song the server refuses is skipped;
-     * a network failure ends the run.
+     * Sends [toSend] a few songs at a time. The server only stores them, so this is limited
+     * by the network. A song the server refuses is skipped; a network failure ends the run.
      *
-     * @return the songs the server can route with
+     * @return the ids of the songs that were not sent, or null when the user cancelled
      */
-    private fun analyse(
+    private fun upload(
         run: Long,
         cancelled: AtomicBoolean,
         client: AiMashupClient,
-        items: List<AiMashupClient.RemoteTrack>,
-        missing: Set<String>
-    ): List<AiMashupClient.RemoteTrack> {
-        val ready = ArrayList<AiMashupClient.RemoteTrack>(items.size)
-        val total = items.count { it.id in missing }
-        var done = 0
-        var skipped = 0
-        for (item in items) {
-            if (cancelled.get()) return ready
-            if (item.id !in missing) {
-                ready.add(item)
-                continue
-            }
-            post(run, State(Phase.ANALYSING, done, total, item.track.title, skipped))
-            if (uploadOne(client, item, cancelled)) ready.add(item) else skipped++
-            done++
+        toSend: List<AiMashupClient.RemoteTrack>,
+        device: String
+    ): Set<String>? {
+        if (toSend.isEmpty()) return emptySet()
+        val stop = AtomicBoolean(false)
+        val failed = HashSet<String>()
+        val pool = Executors.newFixedThreadPool(minOf(PARALLEL_UPLOADS, toSend.size)) { task ->
+            Thread(task, "Mediaplayer-AiUpload").apply { isDaemon = true }
         }
-        return ready
+        val completion = ExecutorCompletionService<Pair<AiMashupClient.RemoteTrack, Boolean>>(pool)
+        try {
+            for (item in toSend) completion.submit(Callable { item to uploadOne(client, item, stop) })
+            post(run, State(Phase.UPLOADING, total = toSend.size, device = device))
+            for (done in 1..toSend.size) {
+                val (item, sent) = nextUpload(completion, cancelled) ?: return null
+                if (!sent) failed.add(item.id)
+                post(run, State(Phase.UPLOADING, done, toSend.size, item.track.title, failed.size, device = device))
+            }
+        } finally {
+            stop.set(true)
+            pool.shutdownNow()
+        }
+        return failed
+    }
+
+    /** The next finished upload, or null when the user cancelled while waiting. */
+    private fun <T> nextUpload(completion: ExecutorCompletionService<T>, cancelled: AtomicBoolean): T? {
+        for (wait in 0 until MAX_UPLOAD_WAITS) {
+            if (cancelled.get()) return null
+            val future = pollOnce(completion) ?: continue
+            return uploadResult(future)
+        }
+        throw AiMashupClient.ServerException("an upload took too long")
+    }
+
+    private fun <T> pollOnce(completion: ExecutorCompletionService<T>): Future<T>? {
+        return try {
+            completion.poll(UPLOAD_POLL_MS, TimeUnit.MILLISECONDS)
+        } catch (e: InterruptedException) {
+            Thread.currentThread().interrupt()
+            throw InterruptedIOException("interrupted while uploading")
+        }
+    }
+
+    /** Unwraps the upload's own exception so a network failure ends the run as usual. */
+    private fun <T> uploadResult(future: Future<T>): T {
+        try {
+            return future.get()
+        } catch (e: ExecutionException) {
+            when (val cause = e.cause) {
+                is IOException -> throw cause
+                is RuntimeException -> throw cause
+                else -> throw IOException("upload failed: ${cause?.message}")
+            }
+        } catch (e: InterruptedException) {
+            Thread.currentThread().interrupt()
+            throw InterruptedIOException("interrupted while uploading")
+        }
+    }
+
+    /** Starts the server's analysis of [sent] and follows it until it ends. */
+    private fun analyseOnServer(
+        run: Long,
+        cancelled: AtomicBoolean,
+        client: AiMashupClient,
+        sent: List<AiMashupClient.RemoteTrack>,
+        device: String,
+        uploadFailures: Int
+    ) {
+        val jobId = client.startAnalysis(sent.map { it.id })
+        post(run, State(Phase.ANALYSING, total = sent.size, skipped = uploadFailures, device = device))
+        for (poll in 0 until MAX_JOB_POLLS) {
+            if (cancelled.get()) return
+            pause(JOB_POLL_MS)
+            val status = client.jobStatus(jobId)
+            val skipped = uploadFailures + status.failed
+            post(run, State(Phase.ANALYSING, status.done, status.total, skipped = skipped, device = device))
+            if (status.finished) {
+                if (!status.succeeded) {
+                    throw AiMashupClient.ServerException(status.error.ifEmpty { "the analysis failed" })
+                }
+                return
+            }
+        }
+        throw AiMashupClient.ServerException("the analysis did not finish in time")
+    }
+
+    private fun pause(ms: Long) {
+        try {
+            Thread.sleep(ms)
+        } catch (e: InterruptedException) {
+            Thread.currentThread().interrupt()
+            throw InterruptedIOException("interrupted while waiting for the server")
+        }
     }
 
     /** @return false when the server could not use this one song */
@@ -273,6 +364,17 @@ class AiMashupGenerator private constructor(context: Context) {
         private const val PLAYLIST_COUNT = 3
         private const val TRACKS_PER_PLAYLIST = 5
         private const val MAX_MIXES = 20
+
+        /** Songs sent at the same time; more rarely helps on Wi-Fi. */
+        private const val PARALLEL_UPLOADS = 3
+        private const val UPLOAD_POLL_MS = 500L
+
+        /** 20 minutes of waiting for one upload to finish. */
+        private const val MAX_UPLOAD_WAITS = 2400
+        private const val JOB_POLL_MS = 1500L
+
+        /** 30 minutes of waiting for the server's analysis. */
+        private const val MAX_JOB_POLLS = 1200
 
         /** Routing time grows quickly with the number of songs, so one run is bounded. */
         const val MAX_SOURCE_TRACKS = 40

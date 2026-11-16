@@ -174,22 +174,22 @@ class SettingsFragment : Fragment(R.layout.fragment_settings), LibraryRepository
         }
     }
 
-    /** Worker thread. The number of analysed songs and an empty reason, or -1 and the reason. */
-    private fun pingServer(client: AiMashupClient): Pair<Int, String> {
+    /** Worker thread. The server's health and an empty reason, or null and the reason. */
+    private fun pingServer(client: AiMashupClient): Pair<AiMashupClient.Health?, String> {
         return try {
             client.ping() to ""
         } catch (e: IOException) {
-            -1 to (e.message ?: e.javaClass.simpleName)
+            null to (e.message ?: e.javaClass.simpleName)
         } catch (e: RuntimeException) {
-            -1 to (e.message ?: e.javaClass.simpleName)
+            null to (e.message ?: e.javaClass.simpleName)
         }
     }
 
-    private fun showTestOutcome(run: Long, outcome: Pair<Int, String>) {
+    private fun showTestOutcome(run: Long, outcome: Pair<AiMashupClient.Health?, String>) {
         if (!isAdded || view == null || run != testGeneration) return
-        val (count, reason) = outcome
-        aiStatusView.text = if (count >= 0) {
-            getString(R.string.settings_ai_ok, count)
+        val (health, reason) = outcome
+        aiStatusView.text = if (health != null) {
+            getString(R.string.settings_ai_ok, health.device, health.cachedTracks)
         } else {
             getString(R.string.settings_ai_failed, reason)
         }

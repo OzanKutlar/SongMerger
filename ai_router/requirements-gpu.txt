@@ -1,0 +1,4 @@
+# PyTorch built for CUDA 12.8, required by RTX 50-series GPUs such as the RTX 5060 Ti.
+# Install after requirements.txt:  pip install -r requirements-gpu.txt
+--index-url https://download.pytorch.org/whl/cu128
+torch>=2.7.0

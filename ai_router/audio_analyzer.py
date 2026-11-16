@@ -16,6 +16,7 @@ MAX_CUES_PER_TRACK = 18
 MIN_CUE_SPACING_SEC = 7.0
 EDGE_MARGIN_SEC = 6.0
 MAX_ANALYSIS_SEC = 600.0
+FEATURE_KEYS = ("chroma", "mfcc", "contrast", "centroid", "rms", "onset")
 
 
 def _safe_unit(vec: np.ndarray) -> np.ndarray:
@@ -114,14 +115,8 @@ def _extract_cue_descriptor(
     }
 
 
-def analyze_audio_file(
-    file_path: Path,
-    track_id: str,
-    title: str,
-    artist: str,
-    fingerprint: str,
-) -> dict[str, Any]:
-    """Analyzes an audio file into harmonic, timbral, and phrase-boundary cue descriptors."""
+def decode_audio(file_path: Path) -> np.ndarray:
+    """CPU work, safe in a worker process: peak-normalised mono float32 at SAMPLE_RATE."""
     y, sr = librosa.load(str(file_path), sr=SAMPLE_RATE, mono=True, duration=MAX_ANALYSIS_SEC)
     if y is None or len(y) == 0:
         raise ValueError("Decoded audio is empty")
@@ -134,16 +129,53 @@ def analyze_audio_file(
     peak = float(np.max(np.abs(y)))
     if peak > 1e-6:
         y = (y / peak).astype(np.float32)
+    return np.ascontiguousarray(y, dtype=np.float32)
 
+
+def librosa_features(y: np.ndarray) -> dict[str, np.ndarray]:
+    """CPU feature extraction with librosa; the fallback when PyTorch or the GPU is unavailable."""
+    sr = SAMPLE_RATE
     y_harm, y_perc = librosa.effects.hpss(y)
 
     chroma = librosa.feature.chroma_cqt(y=y_harm, sr=sr, hop_length=HOP_LENGTH)
-    tonnetz = librosa.feature.tonnetz(chroma=chroma)
     mfcc = librosa.feature.mfcc(y=y, sr=sr, n_mfcc=13, hop_length=HOP_LENGTH)
     contrast = librosa.feature.spectral_contrast(y=y, sr=sr, hop_length=HOP_LENGTH)
     centroid = librosa.feature.spectral_centroid(y=y, sr=sr, hop_length=HOP_LENGTH)[0]
     rms = librosa.feature.rms(y=y, hop_length=HOP_LENGTH)[0]
     onset_env = librosa.onset.onset_strength(y=y_perc, sr=sr, hop_length=HOP_LENGTH)
+    return {
+        "chroma": chroma,
+        "mfcc": mfcc,
+        "contrast": contrast,
+        "centroid": centroid,
+        "rms": rms,
+        "onset": onset_env,
+    }
+
+
+def build_profile(
+    features: dict[str, np.ndarray],
+    duration_sec: float,
+    track_id: str,
+    title: str,
+    artist: str,
+    fingerprint: str,
+) -> dict[str, Any]:
+    """Picks phrase-boundary cues and describes each one; shared by the GPU and CPU paths."""
+    missing = [key for key in FEATURE_KEYS if key not in features]
+    if missing:
+        raise ValueError(f"Missing features: {missing}")
+    frames = min(int(np.shape(features[key])[-1]) for key in FEATURE_KEYS)
+    if frames < 2:
+        raise ValueError("Too few analysis frames")
+    sr = SAMPLE_RATE
+    chroma = np.asarray(features["chroma"], dtype=np.float32)[:, :frames]
+    mfcc = np.asarray(features["mfcc"], dtype=np.float32)[:, :frames]
+    contrast = np.asarray(features["contrast"], dtype=np.float32)[:, :frames]
+    centroid = np.asarray(features["centroid"], dtype=np.float32).reshape(-1)[:frames]
+    rms = np.asarray(features["rms"], dtype=np.float32).reshape(-1)[:frames]
+    onset_env = np.asarray(features["onset"], dtype=np.float32).reshape(-1)[:frames]
+    tonnetz = librosa.feature.tonnetz(chroma=chroma)
 
     # Spectral novelty from MFCC delta magnitude
     mfcc_delta = np.diff(mfcc, axis=1, prepend=mfcc[:, :1])
@@ -177,6 +209,32 @@ def analyze_audio_file(
         "duration_ms": int(round(duration_sec * 1000.0)),
         "cues": cues,
     }
+
+
+def analyze_decoded(
+    y: np.ndarray,
+    track_id: str,
+    title: str,
+    artist: str,
+    fingerprint: str,
+    extractor: Any = None,
+) -> dict[str, Any]:
+    """Profiles an already decoded signal; [extractor] is a gpu_features.FeatureExtractor or None."""
+    features = extractor.extract(y) if extractor is not None else librosa_features(y)
+    duration_sec = float(len(y)) / float(SAMPLE_RATE)
+    return build_profile(features, duration_sec, track_id, title, artist, fingerprint)
+
+
+def analyze_audio_file(
+    file_path: Path,
+    track_id: str,
+    title: str,
+    artist: str,
+    fingerprint: str,
+    extractor: Any = None,
+) -> dict[str, Any]:
+    """Decodes and profiles one file in the calling thread."""
+    return analyze_decoded(decode_audio(file_path), track_id, title, artist, fingerprint, extractor)
 
 
 class FeatureCache:

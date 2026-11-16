@@ -30,21 +30,28 @@ class AiMashupClient(context: Context, baseUrl: String) {
 
     data class RemoteMix(val name: String, val score: Double, val steps: List<MashupRouteParser.Step>)
 
+    /** What the server reports about itself; [device] is where it analyses songs. */
+    data class Health(val cachedTracks: Int, val device: String)
+
+    /** Progress of a server-side analysis job; [failed] counts songs it could not use. */
+    data class JobStatus(val phase: String, val done: Int, val total: Int, val failed: Int, val error: String) {
+        val finished: Boolean
+            get() = phase == "done" || phase == "failed"
+
+        val succeeded: Boolean
+            get() = phase == "done"
+    }
+
     private val resolver = context.applicationContext.contentResolver
     private val base = PlayerSettings.sanitiseServerUrl(baseUrl)
 
     // ------------------------------------------------------------------ requests
 
-    /** @return how many songs the server has already analysed */
-    fun ping(): Int {
-        val connection = open(PATH_HEALTH, "GET", QUICK_TIMEOUT_MS)
-        try {
-            val answer = readJson(connection)
-            if (answer.optString("status") != "ok") throw ServerException("this is not a mashup server")
-            return answer.optInt("cached_tracks", 0)
-        } finally {
-            connection.disconnect()
-        }
+    /** Checks that this is a mashup server and reports its cache size and device. */
+    fun ping(): Health {
+        val answer = getJson(PATH_HEALTH, QUICK_TIMEOUT_MS)
+        if (answer.optString("status") != "ok") throw ServerException("this is not a mashup server")
+        return Health(answer.optInt("cached_tracks", 0), answer.optString("device").ifEmpty { "cpu" })
     }
 
     /** The ids of [tracks] the server has not analysed yet, or whose file changed since. */
@@ -67,7 +74,8 @@ class AiMashupClient(context: Context, baseUrl: String) {
     }
 
     /**
-     * Sends one song and waits until the server has analysed it.
+     * Sends one song. The server only stores it, so this is limited by the network;
+     * [startAnalysis] analyses the stored songs afterwards.
      *
      * @throws ServerException when the server cannot use this song
      * @throws InterruptedIOException when [cancelled] was set during the upload
@@ -78,7 +86,7 @@ class AiMashupClient(context: Context, baseUrl: String) {
         if (length <= 0L || length > MAX_UPLOAD_BYTES) {
             throw ServerException("the file size $length cannot be sent")
         }
-        val connection = open(PATH_UPLOAD, "POST", ANALYSIS_TIMEOUT_MS)
+        val connection = open(PATH_UPLOAD, "POST", UPLOAD_TIMEOUT_MS)
         try {
             connection.doOutput = true
             connection.setFixedLengthStreamingMode(length)
@@ -95,6 +103,29 @@ class AiMashupClient(context: Context, baseUrl: String) {
         } finally {
             connection.disconnect()
         }
+    }
+
+    /** Starts analysing the uploaded songs [ids] on the server; returns the job id. */
+    fun startAnalysis(ids: List<String>): String {
+        val body = encoding { JSONObject().put("track_ids", JSONArray(ids)) }
+        val answer = postJson(PATH_ANALYZE, body, QUICK_TIMEOUT_MS)
+        val jobId = answer.optString("job_id")
+        val usable = jobId.isNotEmpty() && jobId.length <= MAX_JOB_ID_CHARS &&
+            jobId.all { it in '0'..'9' || it in 'a'..'z' }
+        if (!usable) throw ServerException("the server sent no usable job id")
+        return jobId
+    }
+
+    /** The progress of the analysis job [jobId] from [startAnalysis]. */
+    fun jobStatus(jobId: String): JobStatus {
+        val answer = getJson(PATH_JOBS + jobId, QUICK_TIMEOUT_MS)
+        return JobStatus(
+            phase = answer.optString("phase"),
+            done = answer.optInt("done", 0),
+            total = answer.optInt("total", 0),
+            failed = answer.optInt("failed", 0),
+            error = answer.optString("error")
+        )
     }
 
     /** Asks for mashups made from the analysed songs [ids]. */
@@ -146,6 +177,15 @@ class AiMashupClient(context: Context, baseUrl: String) {
         connection.useCaches = false
         connection.setRequestProperty("Accept", "application/json")
         return connection
+    }
+
+    private fun getJson(path: String, readTimeoutMs: Int): JSONObject {
+        val connection = open(path, "GET", readTimeoutMs)
+        try {
+            return readJson(connection)
+        } finally {
+            connection.disconnect()
+        }
     }
 
     private fun postJson(path: String, body: JSONObject, readTimeoutMs: Int): JSONObject {
@@ -250,11 +290,14 @@ class AiMashupClient(context: Context, baseUrl: String) {
         const val PATH_CHECK = "/api/v1/check-cache"
         const val PATH_UPLOAD = "/api/v1/upload-track"
         const val PATH_ROUTE = "/api/v1/route"
+        const val PATH_ANALYZE = "/api/v1/analyze"
+        const val PATH_JOBS = "/api/v1/jobs/"
+        const val MAX_JOB_ID_CHARS = 64
         const val CONNECT_TIMEOUT_MS = 8000
         const val QUICK_TIMEOUT_MS = 15000
 
-        /** The server analyses a song before it answers the upload. */
-        const val ANALYSIS_TIMEOUT_MS = 5 * 60 * 1000
+        /** Time to wait for the server's answer once a song is sent; it only stores the file. */
+        const val UPLOAD_TIMEOUT_MS = 2 * 60 * 1000
         const val ROUTE_TIMEOUT_MS = 10 * 60 * 1000
 
         /** The same limit as MAX_UPLOAD_BYTES in server.py. */

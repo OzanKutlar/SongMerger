@@ -211,7 +211,7 @@ object AiMashupDialog {
                 dialog.dismiss()
                 return
             }
-            Phase.CONNECTING, Phase.ANALYSING, Phase.ROUTING -> renderRunning(context, views, state)
+            Phase.CONNECTING, Phase.UPLOADING, Phase.ANALYSING, Phase.ROUTING -> renderRunning(context, views, state)
             Phase.COMPLETED -> renderResults(context, host, views, state)
             Phase.FAILED -> renderFailure(context, views, state)
         }
@@ -222,13 +222,21 @@ object AiMashupDialog {
         views.scroll.visibility = View.GONE
         views.progress.visibility = View.VISIBLE
         when (state.phase) {
+            Phase.UPLOADING -> {
+                views.status.text = context.getString(R.string.mashup_uploading, state.done, state.total)
+                val last = if (state.currentTitle.isEmpty()) {
+                    ""
+                } else {
+                    context.getString(R.string.mashup_uploading_now, state.currentTitle)
+                }
+                views.detail.text = last + skippedLine(context, state)
+                showCount(views.progress, state.done, state.total)
+            }
             Phase.ANALYSING -> {
                 views.status.text = context.getString(R.string.mashup_analysing, state.done, state.total)
-                views.detail.text = context.getString(R.string.mashup_analysing_now, state.currentTitle) +
+                views.detail.text = context.getString(R.string.mashup_analysing_on, state.device.ifEmpty { "?" }) +
                     skippedLine(context, state)
-                views.progress.isIndeterminate = false
-                views.progress.max = maxOf(1, state.total)
-                views.progress.progress = state.done
+                showCount(views.progress, state.done, state.total)
             }
             Phase.ROUTING -> {
                 views.status.setText(R.string.mashup_routing)
@@ -381,6 +389,13 @@ object AiMashupDialog {
     }
 
     // ------------------------------------------------------------------ helpers
+
+    /** A determinate bar once the total is known, an indeterminate one before. */
+    private fun showCount(progress: ProgressBar, done: Int, total: Int) {
+        progress.isIndeterminate = total <= 0
+        progress.max = maxOf(1, total)
+        progress.progress = done.coerceIn(0, maxOf(1, total))
+    }
 
     private fun skippedLine(context: Context, state: AiMashupGenerator.State): String {
         if (state.skipped <= 0) return ""

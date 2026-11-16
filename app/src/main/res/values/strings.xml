@@ -134,6 +134,9 @@
     <string name="mashup_connecting">Connecting to the server&#8230;</string>
     <string name="mashup_analysing">Analysing songs (%1$d / %2$d)</string>
     <string name="mashup_analysing_now">Now sending: %1$s</string>
+    <string name="mashup_uploading">Uploading songs (%1$d / %2$d)</string>
+    <string name="mashup_uploading_now">Last sent: %1$s</string>
+    <string name="mashup_analysing_on">Analysing on %1$s</string>
     <string name="mashup_routing">Finding the smoothest transitions&#8230;</string>
     <string name="mashup_routing_body">This can take a minute or two for a large selection.</string>
     <plurals name="mashup_skipped">
@@ -207,7 +210,7 @@
     <string name="settings_ai_cleared">Server address cleared</string>
     <string name="settings_ai_empty">Enter an address first</string>
     <string name="settings_ai_testing">Testing&#8230;</string>
-    <string name="settings_ai_ok">Connected. Songs already analysed on the server: %1$d</string>
+    <string name="settings_ai_ok">Connected. Analysis runs on %1$s. Songs already analysed: %2$d</string>
     <string name="settings_ai_failed">Cannot use the server: %1$s</string>
     <string name="settings_sample_tag">Artist One, Artist Two</string>
     <string name="settings_preview">%1$s\n&#8594;  %2$s</string>

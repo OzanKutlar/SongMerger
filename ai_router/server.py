@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import tempfile
+import time
 import wave
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -12,16 +14,28 @@ from urllib.parse import unquote_plus
 
 import numpy as np
 
-from audio_analyzer import FeatureCache, analyze_audio_file
-from router_engine import generate_mashup_playlists
+from audio_analyzer import FeatureCache
+from jobs import JobRunner, UploadInbox
+from router_engine import CueTable, generate_mashup_playlists, score_transition
 
 MAX_UPLOAD_BYTES = 80 * 1024 * 1024
 DEFAULT_CACHE_DIR = Path(__file__).resolve().parent / "cache"
+JOBS_PREFIX = "/api/v1/jobs/"
+MAX_WORKERS = 8
+SELF_TEST_POLLS = 2400
+
+
+def default_workers() -> int:
+    return max(1, min(MAX_WORKERS, (os.cpu_count() or 2) - 1))
 
 
 class RouterContext:
-    def __init__(self, cache_dir: Path) -> None:
+    def __init__(self, cache_dir: Path, device: str, device_label: str, workers: int) -> None:
         self.cache = FeatureCache(cache_dir)
+        self.inbox = UploadInbox(cache_dir / "inbox")
+        self.inbox.purge_stale()
+        self.device_label = device_label
+        self.runner = JobRunner(self.cache, self.inbox, device, workers)
 
 
 def make_handler(ctx: RouterContext) -> type[BaseHTTPRequestHandler]:
@@ -53,8 +67,15 @@ def make_handler(ctx: RouterContext) -> type[BaseHTTPRequestHandler]:
             if self.path == "/api/v1/health":
                 self._send_json(
                     HTTPStatus.OK,
-                    {"status": "ok", "cached_tracks": ctx.cache.count()},
+                    {"status": "ok", "cached_tracks": ctx.cache.count(), "device": ctx.device_label},
                 )
+                return
+            if self.path.startswith(JOBS_PREFIX):
+                job = ctx.runner.get(self.path[len(JOBS_PREFIX):].strip("/"))
+                if job is None:
+                    self._send_json(HTTPStatus.NOT_FOUND, {"error": "Unknown job"})
+                else:
+                    self._send_json(HTTPStatus.OK, job.snapshot())
                 return
             self._send_json(HTTPStatus.NOT_FOUND, {"error": "Not found"})
 
@@ -63,6 +84,8 @@ def make_handler(ctx: RouterContext) -> type[BaseHTTPRequestHandler]:
                 self._handle_check_cache()
             elif self.path == "/api/v1/upload-track":
                 self._handle_upload_track()
+            elif self.path == "/api/v1/analyze":
+                self._handle_analyze()
             elif self.path == "/api/v1/route":
                 self._handle_route()
             else:
@@ -93,29 +116,25 @@ def make_handler(ctx: RouterContext) -> type[BaseHTTPRequestHandler]:
                 self._send_json(HTTPStatus.BAD_REQUEST, {"error": "Invalid upload headers or size"})
                 return
 
-            suffix = Path(filename).suffix or ".mp3"
-            tmp_path: Path | None = None
+            suffix = Path(filename).suffix.lower() or ".mp3"
+            meta = {"title": title, "artist": artist, "fingerprint": fingerprint}
             try:
-                with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
-                    tmp_path = Path(tmp.name)
-                    remaining = length
-                    while remaining > 0:
-                        chunk = self.rfile.read(min(65536, remaining))
-                        if not chunk:
-                            break
-                        tmp.write(chunk)
-                        remaining -= len(chunk)
-                profile = analyze_audio_file(tmp_path, track_id, title, artist, fingerprint)
-                ctx.cache.put(profile)
-                self._send_json(
-                    HTTPStatus.OK,
-                    {"status": "analyzed", "track_id": track_id, "cues": len(profile["cues"])},
-                )
-            except Exception as exc:  # noqa: BLE001
-                self._send_json(HTTPStatus.UNPROCESSABLE_ENTITY, {"error": str(exc)})
-            finally:
-                if tmp_path is not None and tmp_path.exists():
-                    tmp_path.unlink(missing_ok=True)
+                stored = ctx.inbox.store(track_id, suffix, meta, self.rfile, length)
+            except ValueError as exc:
+                self._send_json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
+                return
+            except OSError as exc:
+                self._send_json(HTTPStatus.INTERNAL_SERVER_ERROR, {"error": f"cannot store the upload: {exc}"})
+                return
+            self._send_json(HTTPStatus.OK, {"status": "stored", "track_id": track_id, "bytes": stored})
+
+        def _handle_analyze(self) -> None:
+            data = self._read_json()
+            if not data or not isinstance(data.get("track_ids"), list):
+                self._send_json(HTTPStatus.BAD_REQUEST, {"error": "Invalid track_ids"})
+                return
+            job = ctx.runner.start([str(tid) for tid in data["track_ids"]])
+            self._send_json(HTTPStatus.OK, job.snapshot())
 
         def _handle_route(self) -> None:
             data = self._read_json()
@@ -147,16 +166,48 @@ def _write_test_wav(path: Path, freq_hz: float, duration_sec: float = 32.0) -> N
         wf.writeframes(pcm.tobytes())
 
 
-def run_self_test() -> None:
+def run_self_test(device: str, workers: int, device_label: str) -> None:
+    """Upload inbox, analysis job (decode workers + extractor), score matrix and routing."""
+    print(f"Self-test on {device_label} with {workers} decode workers")
+    tones = [("Song A", 220.0), ("Song B", 330.0), ("Song C", 440.0), ("Song D", 293.66)]
     with tempfile.TemporaryDirectory() as tmpdir:
         tmp = Path(tmpdir)
-        profiles = []
-        for idx, (name, freq) in enumerate([("Song A", 220.0), ("Song B", 330.0), ("Song C", 440.0)]):
+        cache = FeatureCache(tmp / "cache")
+        inbox = UploadInbox(tmp / "cache" / "inbox")
+        ids: list[str] = []
+        for idx, (name, freq) in enumerate(tones):
             wav_path = tmp / f"song_{idx}.wav"
             _write_test_wav(wav_path, freq)
-            profiles.append(analyze_audio_file(wav_path, f"id_{idx}", name, "Test Artist", "fp_1"))
+            track_id = f"id{idx}"
+            meta = {"title": name, "artist": "Test Artist", "fingerprint": "fp1"}
+            with wav_path.open("rb") as stream:
+                inbox.store(track_id, ".wav", meta, stream, wav_path.stat().st_size)
+            ids.append(track_id)
+
+        runner = JobRunner(cache, inbox, device, workers)
+        started = time.perf_counter()
+        job = runner.start(ids)
+        for _ in range(SELF_TEST_POLLS):
+            if job.is_finished():
+                break
+            time.sleep(0.25)
+        runner.shutdown()
+        status = job.snapshot()
+        assert status["phase"] == "done" and status["failed"] == 0, f"Analysis job failed: {status}"
+        print(f"Analysed {status['done']} songs in {time.perf_counter() - started:.1f}s")
+
+        profiles = [cache.get(tid) for tid in ids]
+        assert all(p is not None for p in profiles), "Expected every song in the cache"
+        table = CueTable(profiles)
+        first, second = profiles[0], profiles[1]
+        expected = score_transition(first["cues"][0], second["cues"][0])
+        actual = table.score_of(first["track_id"], 0, second["track_id"], 0)
+        assert abs(expected - actual) < 1e-3, f"Score matrix mismatch: {expected} vs {actual}"
+
+        started = time.perf_counter()
         playlists = generate_mashup_playlists(profiles, playlist_count=2, tracks_per_playlist=3)
         assert playlists, "Expected at least one generated mashup playlist"
+        print(f"Routed in {time.perf_counter() - started:.2f}s")
         print(f"Self-test passed! Sample route: {playlists[0]['route_string']}")
 
 
@@ -166,19 +217,46 @@ def main() -> None:
     parser.add_argument("--port", type=int, default=8765)
     parser.add_argument("--cache-dir", type=Path, default=DEFAULT_CACHE_DIR)
     parser.add_argument("--self-test", action="store_true")
+    parser.add_argument(
+        "--device",
+        choices=("auto", "cuda", "cpu"),
+        default="auto",
+        help="auto uses the GPU when PyTorch can see one",
+    )
+    parser.add_argument(
+        "--workers",
+        type=int,
+        default=default_workers(),
+        help="processes that decode songs in parallel",
+    )
     args = parser.parse_args()
 
+    # PyTorch is imported only here, so the decode worker processes never load it.
+    from gpu_features import describe_device, pick_device
+
+    try:
+        device = pick_device(args.device)
+    except RuntimeError as exc:
+        raise SystemExit(f"[ai_router] {exc}") from exc
+    workers = max(1, min(MAX_WORKERS, args.workers))
+    label = describe_device(device)
+
     if args.self_test:
-        run_self_test()
+        run_self_test(device, workers, label)
         return
 
-    ctx = RouterContext(args.cache_dir)
+    ctx = RouterContext(args.cache_dir, device, label, workers)
     server = ThreadingHTTPServer((args.host, args.port), make_handler(ctx))
-    print(f"AI DJ Router listening on http://{args.host}:{args.port} (cached={ctx.cache.count()})")
+    print(
+        f"AI DJ Router listening on http://{args.host}:{args.port} "
+        f"(device={label}, workers={workers}, cached={ctx.cache.count()})"
+    )
     try:
         server.serve_forever()
     except KeyboardInterrupt:
         print("\nShutting down...")
+    finally:
+        ctx.runner.shutdown()
         server.server_close()
 
 
