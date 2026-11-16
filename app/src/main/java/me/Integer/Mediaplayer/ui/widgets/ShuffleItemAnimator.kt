@@ -230,12 +230,10 @@ class ShuffleItemAnimator(private val list: RecyclerView) : DefaultItemAnimator(
 
     override fun runPendingAnimations() {
         super.runPendingAnimations()
-        val showScrollbar = cameraDeltaPx != 0
         disarm()
         if (pending.isEmpty()) return
         val flights = ArrayList(pending)
         pending.clear()
-        if (showScrollbar) list.awakenScrollBars()
         for (flight in flights) launch(flight)
     }
 
