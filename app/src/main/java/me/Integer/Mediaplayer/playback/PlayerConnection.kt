@@ -257,6 +257,23 @@ class PlayerConnection(context: Context, private val listener: NowPlayingListene
         publish()
     }
 
+    /**
+     * Removes several runs of queue positions, one player call per run. [ranges] must go
+     * from the end of the queue backwards, so each removal leaves the next runs valid;
+     * a run that breaks that order or lies outside the queue is skipped.
+     */
+    fun removeQueueRanges(ranges: List<IntRange>) {
+        val player = controller ?: return
+        var below = Int.MAX_VALUE
+        for (range in ranges) {
+            if (range.isEmpty() || range.first < 0 || range.last >= below) continue
+            if (range.last >= player.mediaItemCount) continue
+            player.removeMediaItems(range.first, range.last + 1)
+            below = range.first
+        }
+        publish()
+    }
+
     fun skipToQueueItem(index: Int) {
         val player = controller ?: return
         if (index !in 0 until player.mediaItemCount) return

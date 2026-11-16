@@ -1,6 +1,8 @@
 package me.Integer.Mediaplayer.ui
 
 import android.annotation.SuppressLint
+import android.graphics.drawable.ColorDrawable
+import android.graphics.drawable.Drawable
 import android.view.LayoutInflater
 import android.view.MotionEvent
 import android.view.View
@@ -24,7 +26,9 @@ class QueueAdapter(
     private val unknownTitle: String,
     private val unknownArtist: String,
     private val onStartDrag: (RecyclerView.ViewHolder) -> Unit,
+    private val selection: QueueSelection,
     private val onTap: (Int) -> Unit,
+    private val onLongPress: (Int) -> Unit,
     private val onRemove: (Int) -> Unit,
     private val onReorder: (previous: LongArray, next: LongArray, activeIndex: Int) -> Unit
 ) : RecyclerView.Adapter<QueueAdapter.Holder>() {
@@ -37,6 +41,9 @@ class QueueAdapter(
         val artist: TextView = view.findViewById(R.id.queueArtist)
         val remove: View = view.findViewById(R.id.queueRemove)
         val divider: View = view.findViewById(R.id.queueDivider)
+        val check: ImageView = view.findViewById(R.id.queueCheck)
+        val normalBackground: Drawable? = view.background
+        val pickedBackground: Drawable = ColorDrawable(0x2200E676)
     }
 
     /** The player's queue as last submitted; never modified. */
@@ -58,8 +65,9 @@ class QueueAdapter(
 
     @SuppressLint("NotifyDataSetChanged")
     fun submit(next: List<QueueItem>, activeIndex: Int) {
-        if (next === source && local == null) {
-            moveHighlight(activeIndex)
+        if (next === source) {
+            // With a local copy, the player has not caught up with a drag or a swipe yet.
+            if (local == null) moveHighlight(activeIndex)
             return
         }
         val previous = uids
@@ -136,6 +144,50 @@ class QueueAdapter(
         notifyItemMoved(from, to)
     }
 
+    /** Hides a row at once after a swipe; the player's queue confirms it right after. */
+    fun removeLocal(position: Int) {
+        if (position !in uids.indices) return
+        var list = local
+        if (list == null) {
+            list = ArrayList(source)
+            local = list
+        }
+        if (position !in list.indices) return
+        list.removeAt(position)
+        val previousActiveUid = uids.getOrElse(currentIndex) { NO_UID }
+        val old = uids
+        uids = LongArray(old.size - 1) { if (it < position) old[it] else old[it + 1] }
+        if (currentIndex > position) currentIndex--
+        notifyItemRemoved(position)
+        // The row that is now last loses its divider.
+        if (position == uids.size && uids.isNotEmpty()) notifyItemChanged(uids.size - 1, PAYLOAD_STATE)
+        refreshHighlight(previousActiveUid)
+    }
+
+    /** The slot id at [position], or null when there is no such row. */
+    fun uidAt(position: Int): Long? {
+        return if (position in uids.indices) uids[position] else null
+    }
+
+    /** The song URI at [position] as shown, or null when there is no such row. */
+    fun trackUriAt(position: Int): String? {
+        return items.getOrNull(position)?.trackUri
+    }
+
+    /** Slot ids of the rows as shown, in order. */
+    fun currentUids(): LongArray {
+        return uids.copyOf()
+    }
+
+    /** Restyles every row after selection mode starts, stops, or changes as a whole. */
+    fun refreshSelection() {
+        if (uids.isNotEmpty()) notifyItemRangeChanged(0, uids.size, PAYLOAD_STATE)
+    }
+
+    fun refreshRow(position: Int) {
+        if (position in uids.indices) notifyItemChanged(position, PAYLOAD_STATE)
+    }
+
     override fun getItemId(position: Int): Long {
         return uids.getOrElse(position) { RecyclerView.NO_ID }
     }
@@ -153,9 +205,14 @@ class QueueAdapter(
             val position = holder.bindingAdapterPosition
             if (position != RecyclerView.NO_POSITION) onTap(position)
         }
+        view.setOnLongClickListener {
+            val position = holder.bindingAdapterPosition
+            if (position != RecyclerView.NO_POSITION) onLongPress(position)
+            position != RecyclerView.NO_POSITION
+        }
         holder.remove.setOnClickListener {
             val position = holder.bindingAdapterPosition
-            if (position != RecyclerView.NO_POSITION) onRemove(position)
+            if (position != RecyclerView.NO_POSITION && !selection.isActive) onRemove(position)
         }
         holder.dragHandle.setOnTouchListener { _, event ->
             if (event.actionMasked == MotionEvent.ACTION_DOWN) {
@@ -189,10 +246,20 @@ class QueueAdapter(
         val color = if (position == currentIndex) R.color.accent else R.color.text_primary
         holder.title.setTextColor(ContextCompat.getColor(context, color))
         holder.divider.visibility = if (position == uids.size - 1) View.INVISIBLE else View.VISIBLE
+        val selecting = selection.isActive
+        val picked = selecting && selection.contains(uids.getOrElse(position) { NO_UID })
+        holder.remove.visibility = if (selecting) View.GONE else View.VISIBLE
+        holder.check.visibility = if (selecting) View.VISIBLE else View.GONE
+        val checkColor = if (picked) R.color.accent else R.color.text_muted
+        holder.check.setColorFilter(ContextCompat.getColor(context, checkColor))
+        holder.check.alpha = if (picked) 1f else UNPICKED_ALPHA
+        val background = if (picked) holder.pickedBackground else holder.normalBackground
+        if (holder.itemView.background !== background) holder.itemView.background = background
     }
 
     private companion object {
         const val NO_UID = Long.MIN_VALUE
+        const val UNPICKED_ALPHA = 0.35f
         val PAYLOAD_STATE = Any()
     }
 }

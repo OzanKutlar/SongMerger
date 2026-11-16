@@ -137,6 +137,13 @@ class LibraryRepository private constructor(appContext: Context) {
         return added
     }
 
+    /** Unmarks all [trackUris] as favorites and notifies listeners if any were removed. */
+    fun removeFavorites(trackUris: Collection<String>): Int {
+        val removed = favorites.removeAll(trackUris)
+        if (removed > 0) notifyListenersChanged()
+        return removed
+    }
+
     fun favoriteTracks(): List<Track> {
         val favUris = favorites.all()
         if (favUris.isEmpty()) return emptyList()

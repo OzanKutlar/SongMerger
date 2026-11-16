@@ -82,6 +82,41 @@ object PlaylistDialogs {
             .show()
     }
 
+    /**
+     * Lets the user pick the playlist several songs go into, or create a new one for them.
+     * Songs already in the chosen playlist are skipped; the toast says how many were added.
+     */
+    fun addTracks(
+        context: Context,
+        repository: LibraryRepository,
+        tracks: List<Track>,
+        titleRes: Int = R.string.menu_add_playlist
+    ) {
+        val uris = tracks.map { it.uri }.filter { it.isNotEmpty() }.distinct()
+        if (uris.isEmpty()) {
+            toast(context, context.getString(R.string.queue_nothing_to_save))
+            return
+        }
+        val playlists = repository.playlists.all()
+        val labels = arrayOf(context.getString(R.string.playlist_new_item)) + playlists.map { it.name }
+        AlertDialog.Builder(context)
+            .setTitle(titleRes)
+            .setItems(labels) { _, which ->
+                if (which == 0) {
+                    create(context, repository) { created -> addAllTo(context, repository, created, uris) }
+                } else {
+                    playlists.getOrNull(which - 1)?.let { addAllTo(context, repository, it, uris) }
+                }
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
+    }
+
+    private fun addAllTo(context: Context, repository: LibraryRepository, playlist: Playlist, uris: List<String>) {
+        val added = repository.playlists.addTracks(playlist.id, uris)
+        toast(context, context.resources.getQuantityString(R.plurals.playlist_added_many, added, added, playlist.name))
+    }
+
     private fun addTo(context: Context, repository: LibraryRepository, playlist: Playlist, track: Track) {
         val added = repository.playlists.addTrack(playlist.id, track.uri)
         val message = if (added) R.string.playlist_added else R.string.playlist_already

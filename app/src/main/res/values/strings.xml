@@ -89,6 +89,10 @@
     <string name="playlist_name_invalid">Enter a name for the playlist</string>
     <string name="playlist_added">Added to %1$s</string>
     <string name="playlist_already">Already in %1$s</string>
+    <plurals name="playlist_added_many">
+        <item quantity="one">Added %1$d song to %2$s</item>
+        <item quantity="other">Added %1$d songs to %2$s</item>
+    </plurals>
     <string name="playlist_rename">Rename</string>
     <string name="playlist_delete">Delete playlist</string>
     <string name="playlist_delete_message">Delete %1$s? The songs stay in your library.</string>
@@ -173,6 +177,28 @@
     <string name="queue_empty">The queue is empty</string>
     <string name="queue_drag">Drag to reorder</string>
     <string name="queue_remove">Remove from queue</string>
+    <string name="queue_more">Queue options</string>
+    <string name="queue_save_playlist">Save queue as playlist</string>
+    <string name="queue_select">Select songs</string>
+    <string name="queue_select_all">Select all</string>
+    <string name="queue_selection_close">Stop selecting</string>
+    <string name="queue_nothing_to_save">None of these songs are in your library</string>
+    <plurals name="queue_selected">
+        <item quantity="one">%1$d selected</item>
+        <item quantity="other">%1$d selected</item>
+    </plurals>
+    <plurals name="queue_removed">
+        <item quantity="one">Removed %1$d song from the queue</item>
+        <item quantity="other">Removed %1$d songs from the queue</item>
+    </plurals>
+    <plurals name="queue_favorited">
+        <item quantity="one">Added %1$d song to favorites</item>
+        <item quantity="other">Added %1$d songs to favorites</item>
+    </plurals>
+    <plurals name="queue_unfavorited">
+        <item quantity="one">Removed %1$d song from favorites</item>
+        <item quantity="other">Removed %1$d songs from favorites</item>
+    </plurals>
 
     <!-- Player -->
     <string name="player_idle">Nothing playing</string>

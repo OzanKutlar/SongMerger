@@ -35,6 +35,15 @@ class FavoritesStore(context: Context) {
         return added
     }
 
+    /** Removes all [trackUris] in a single write and returns how many were favorites. */
+    fun removeAll(trackUris: Collection<String>): Int {
+        val current = stored()
+        val doomed = trackUris.filter { it.isNotEmpty() && it in current }.toSet()
+        if (doomed.isEmpty()) return 0
+        save(current - doomed)
+        return doomed.size
+    }
+
     fun all(): Set<String> {
         return stored()
     }
