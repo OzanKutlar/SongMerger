@@ -64,6 +64,7 @@ class VinylDiscView @JvmOverloads constructor(
     private var outgoingTo = 0f
     private var outgoingStartNanos = 0L
     private var outgoingNanos = 0L
+    private var outgoingLiftInPlace = false
     private var phase = PHASE_SHOWN
     private var dragOffset = 0f
     private var springFrom = 0f
@@ -264,7 +265,8 @@ class VinylDiscView @JvmOverloads constructor(
         val now = System.nanoTime()
         val from = currentOffset(now)
         val travel = slideDistance()
-        val base = Motion.scaledNanos(context, SLIDE_NANOS)
+        val liftInPlace = from == 0f
+        val base = Motion.scaledNanos(context, if (liftInPlace) OUTGOING_NANOS else SLIDE_NANOS)
         clearPrevious()
         clearOutgoing()
         cancelRewind()
@@ -274,7 +276,7 @@ class VinylDiscView @JvmOverloads constructor(
         exitOffset = -directionSign(direction) * travel
         if (base > 0L && travel > 0f && isShown) {
             val to = exitOffset
-            val share = minOf(2f, abs(to - from) / travel)
+            val share = if (liftInPlace) 1f else minOf(2f, abs(to - from) / travel)
             outgoingArt = artBitmap
             outgoingShader = artShader
             outgoingPaint.shader = outgoingShader
@@ -282,15 +284,19 @@ class VinylDiscView @JvmOverloads constructor(
             outgoingTo = to
             outgoingStartNanos = now
             outgoingNanos = maxOf(MIN_SLIDE_NANOS, (base * share).toLong())
+            outgoingLiftInPlace = liftInPlace
         }
         invalidate()
         scheduleFrame()
     }
 
-    /** Slides the record in: DIRECTION_NEXT from the right, DIRECTION_PREVIOUS from the left. */
+    /**
+     * Slides the new record in while big, synced with the outgoing record's lift, and then
+     * slims it down onto the spindle once centered.
+     */
     fun enter(direction: Int) {
         val travel = slideDistance()
-        val duration = Motion.scaledNanos(context, SLIDE_NANOS)
+        val duration = Motion.scaledNanos(context, ENTER_NANOS)
         clearPrevious()
         dragOffset = 0f
         springNanos = 0L
@@ -300,9 +306,15 @@ class VinylDiscView @JvmOverloads constructor(
             invalidate()
             return
         }
+        val now = System.nanoTime()
+        val liftDoneAt = if (outgoingLiftInPlace && isOutgoingActive(now)) {
+            outgoingStartNanos + (outgoingNanos * OUTGOING_LIFT_FRACTION).toLong()
+        } else {
+            now
+        }
         phase = PHASE_ENTERING
         enterFrom = directionSign(direction) * travel
-        enterStartNanos = System.nanoTime()
+        enterStartNanos = maxOf(now, liftDoneAt)
         enterNanos = duration
         invalidate()
         scheduleFrame()
@@ -372,7 +384,7 @@ class VinylDiscView @JvmOverloads constructor(
         super.onSizeChanged(w, h, oldw, oldh)
         cx = w / 2f
         cy = h / 2f
-        radius = maxOf(0f, minOf(w, h) / 2f - rimNormalWidth)
+        radius = maxOf(0f, minOf(w, h) * DISC_RADIUS_FRACTION - rimNormalWidth)
         holeRadius = radius * HOLE_FRACTION
         labelRadius = radius * LABEL_FRACTION
         discBounds.set(cx - radius, cy - radius, cx + radius, cy + radius)
@@ -429,12 +441,17 @@ class VinylDiscView @JvmOverloads constructor(
         super.onDraw(canvas)
         if (radius <= 0f) return
         val now = System.nanoTime()
-        if (isOutgoingActive(now)) drawDisc(canvas, outgoingOffset(now), true, 1f)
-        if (phase != PHASE_HIDDEN) drawDisc(canvas, currentOffset(now), false, crossfadeProgress(now))
+        if (isOutgoingActive(now)) {
+            drawDisc(canvas, outgoingOffset(now), discScale * outgoingSwapScale(now), true, 1f)
+        }
+        val waitingToEnter = phase == PHASE_ENTERING && now < enterStartNanos
+        if (phase != PHASE_HIDDEN && !waitingToEnter) {
+            drawDisc(canvas, currentOffset(now), discScale * currentSwapScale(now), false, crossfadeProgress(now))
+        }
     }
 
-    /** One record at a horizontal offset; it fades as it moves away from the centre. */
-    private fun drawDisc(canvas: Canvas, offset: Float, outgoing: Boolean, progress: Float) {
+    /** One record at a horizontal offset and scale; it fades as it moves away from the centre. */
+    private fun drawDisc(canvas: Canvas, offset: Float, scale: Float, outgoing: Boolean, progress: Float) {
         val alpha = slideAlpha(offset)
         val saved = if (alpha < OPAQUE) {
             canvas.saveLayerAlpha(0f, 0f, width.toFloat(), height.toFloat(), alpha)
@@ -442,7 +459,7 @@ class VinylDiscView @JvmOverloads constructor(
             canvas.save()
         }
         canvas.translate(offset, 0f)
-        canvas.scale(discScale, discScale, cx, cy)
+        canvas.scale(scale, scale, cx, cy)
         canvas.save()
         canvas.rotate(angle, cx, cy)
         if (outgoing) drawOutgoingSurface(canvas) else drawSurface(canvas, progress)
@@ -535,8 +552,10 @@ class VinylDiscView @JvmOverloads constructor(
 
     private fun currentOffset(now: Long): Float {
         if (phase == PHASE_ENTERING) {
+            if (now < enterStartNanos) return enterFrom
             val p = fraction(now, enterStartNanos, enterNanos)
-            return enterFrom * (1f - SLIDE_INTERPOLATOR.getInterpolation(p))
+            val slideP = (p / ENTER_SLIDE_FRACTION).coerceIn(0f, 1f)
+            return enterFrom * (1f - SLIDE_INTERPOLATOR.getInterpolation(slideP))
         }
         if (isSpringing(now)) {
             val p = fraction(now, springStartNanos, springNanos)
@@ -545,9 +564,37 @@ class VinylDiscView @JvmOverloads constructor(
         return dragOffset
     }
 
+    private fun currentSwapScale(now: Long): Float {
+        if (phase == PHASE_ENTERING) {
+            if (now < enterStartNanos) return LIFT_MULT
+            val p = fraction(now, enterStartNanos, enterNanos)
+            if (p <= ENTER_SLIDE_FRACTION) return LIFT_MULT
+            val settleP = ((p - ENTER_SLIDE_FRACTION) / (1f - ENTER_SLIDE_FRACTION)).coerceIn(0f, 1f)
+            return 1f + (LIFT_MULT - 1f) * (1f - FADE_INTERPOLATOR.getInterpolation(settleP))
+        }
+        val offset = abs(currentOffset(now))
+        val travel = slideDistance()
+        if (offset == 0f || travel <= 0f) return 1f
+        val dragShare = minOf(1f, offset / (travel * DRAG_LIFT_SPAN))
+        return 1f + (LIFT_MULT - 1f) * dragShare
+    }
+
     private fun outgoingOffset(now: Long): Float {
         val p = fraction(now, outgoingStartNanos, outgoingNanos)
-        return outgoingFrom + (outgoingTo - outgoingFrom) * SLIDE_INTERPOLATOR.getInterpolation(p)
+        if (!outgoingLiftInPlace) {
+            return outgoingFrom + (outgoingTo - outgoingFrom) * SLIDE_INTERPOLATOR.getInterpolation(p)
+        }
+        if (p <= OUTGOING_LIFT_FRACTION) return outgoingFrom
+        val slideP = ((p - OUTGOING_LIFT_FRACTION) / (1f - OUTGOING_LIFT_FRACTION)).coerceIn(0f, 1f)
+        return outgoingFrom + (outgoingTo - outgoingFrom) * SLIDE_INTERPOLATOR.getInterpolation(slideP)
+    }
+
+    private fun outgoingSwapScale(now: Long): Float {
+        if (!outgoingLiftInPlace) return LIFT_MULT
+        val p = fraction(now, outgoingStartNanos, outgoingNanos)
+        if (p >= OUTGOING_LIFT_FRACTION) return LIFT_MULT
+        val liftP = (p / OUTGOING_LIFT_FRACTION).coerceIn(0f, 1f)
+        return 1f + (LIFT_MULT - 1f) * FADE_INTERPOLATOR.getInterpolation(liftP)
     }
 
     private fun isOutgoingActive(now: Long): Boolean {
@@ -576,7 +623,7 @@ class VinylDiscView @JvmOverloads constructor(
 
     private fun finishSlidesAt(now: Long) {
         if (outgoingNanos > 0L && !isOutgoingActive(now)) clearOutgoing()
-        if (phase == PHASE_ENTERING && fraction(now, enterStartNanos, enterNanos) >= 1f) {
+        if (phase == PHASE_ENTERING && now >= enterStartNanos && fraction(now, enterStartNanos, enterNanos) >= 1f) {
             phase = PHASE_SHOWN
             dragOffset = 0f
         }
@@ -588,6 +635,7 @@ class VinylDiscView @JvmOverloads constructor(
         outgoingShader = null
         outgoingPaint.shader = null
         outgoingNanos = 0L
+        outgoingLiftInPlace = false
     }
 
     private fun clearPrevious() {
@@ -706,8 +754,15 @@ class VinylDiscView @JvmOverloads constructor(
         const val NANOS_PER_SECOND = 1e9f
         const val CROSSFADE_NANOS = 450000000L
         const val SLIDE_NANOS = 420000000L
+        const val OUTGOING_NANOS = 520000000L
+        const val ENTER_NANOS = 620000000L
         const val MIN_SLIDE_NANOS = 120000000L
         const val SPRING_NANOS = 320000000L
+        const val OUTGOING_LIFT_FRACTION = 0.28f
+        const val ENTER_SLIDE_FRACTION = 0.68f
+        const val LIFT_MULT = 1.09f
+        const val DRAG_LIFT_SPAN = 0.35f
+        const val DISC_RADIUS_FRACTION = 0.455f
         const val REWIND_RATE = 5f // 1/s, share of the remaining turn per second
         const val REWIND_DONE_DEGREES = 0.5f
         const val MAX_SPIN_DEGREES = 1080f
