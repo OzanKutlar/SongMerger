@@ -69,6 +69,11 @@ internal class PlayerExpand(
         ticker.setTimeListener { _, totalTime, deltaTime -> onTick(totalTime, deltaTime) }
     }
 
+    /** Pre-inflates and measures the target player layout once the screen is sized. */
+    fun warmUp() {
+        measurePlayer()
+    }
+
     /**
      * @param commit opens the player once the card has become it; false if it could not
      * @return false when the bar is not on screen or the player cannot be measured; the
@@ -266,12 +271,12 @@ internal class PlayerExpand(
 
     private companion object {
         const val TAG = "PlayerExpand"
-        const val GROW_STIFFNESS = 240f
+        const val GROW_STIFFNESS = 280f
         const val GROW_DAMPING = 1f
-        const val GROW_MAX_MS = 900L
-        const val ART_WAIT_MS = 600L
-        const val REVEAL_DELAY_MS = 70L
-        const val REVEAL_FADE_MS = 220f
+        const val GROW_MAX_MS = 750L
+        const val ART_WAIT_MS = 120L
+        const val REVEAL_DELAY_MS = 32L
+        const val REVEAL_FADE_MS = 160f
         const val MAX_FRAME_SECONDS = 0.05f
         const val TOP_LEAD = 0.7f
         const val BAR_ICONS = 3

@@ -44,6 +44,7 @@ class PlayerConnection(context: Context, private val listener: NowPlayingListene
     private var nextUid = 1L
     private var queue = TimelineQueue.EMPTY
     private var publishQueued = false
+    private var queueLoadGeneration = 0L
 
     private val publishTask = Runnable {
         publishQueued = false
@@ -72,6 +73,7 @@ class PlayerConnection(context: Context, private val listener: NowPlayingListene
     }
 
     fun release() {
+        queueLoadGeneration++
         main.removeCallbacks(publishTask)
         publishQueued = false
         controller?.removeListener(playerListener)
@@ -194,30 +196,129 @@ class PlayerConnection(context: Context, private val listener: NowPlayingListene
     ) {
         val player = controller ?: return
         if (tracks.isEmpty()) return
-        val items = tracks.take(MAX_QUEUE).map { toItem(it, artistOf(it)) }
-        val index = startIndex.coerceIn(0, items.size - 1)
-        val scramble = shuffle && items.size > 1
+        val gen = ++queueLoadGeneration
+        val capped = if (tracks.size > MAX_QUEUE) tracks.subList(0, MAX_QUEUE) else tracks
+        val total = capped.size
+        val index = startIndex.coerceIn(0, total - 1)
+        val scramble = shuffle && total > 1
         shuffleEnabled = shuffle
-        val original = if (scramble) LongArray(items.size) { QueueCommands.uidOf(items[it]) } else LongArray(0)
+        val baseUid = nextUid
+        nextUid += total
+        val original = if (scramble) LongArray(total) { baseUid + it } else LongArray(0)
         val args = Bundle().apply {
             putBoolean(QueueCommands.ARG_ENABLED, shuffle)
             putLongArray(QueueCommands.ARG_UIDS, original)
         }
         send(player, QueueCommands.ADOPT_ORDER, args)
         player.shuffleModeEnabled = false
-        if (scramble) {
-            val first = items[index]
-            val rest = items.filterIndexed { i, _ -> i != index }.shuffled()
-            val scrambled = ArrayList<MediaItem>(items.size).apply {
-                add(first)
-                addAll(rest)
+        if (total <= INITIAL_QUEUE_BATCH) {
+            val items = ArrayList<MediaItem>(total)
+            for (i in 0 until total) {
+                val track = capped[i]
+                items.add(toItemWithUid(track, artistOf(track), baseUid + i))
             }
-            player.setMediaItems(scrambled, 0, 0L)
-        } else {
-            player.setMediaItems(items, index, 0L)
+            if (scramble) {
+                val first = items[index]
+                val rest = items.filterIndexed { i, _ -> i != index }.shuffled()
+                val scrambled = ArrayList<MediaItem>(total).apply {
+                    add(first)
+                    addAll(rest)
+                }
+                player.setMediaItems(scrambled, 0, 0L)
+            } else {
+                player.setMediaItems(items, index, 0L)
+            }
+            player.prepare()
+            player.play()
+            return
         }
-        player.prepare()
-        player.play()
+        if (scramble) {
+            val order = IntArray(total - 1) { if (it < index) it else it + 1 }
+            order.shuffle()
+            val initialEnd = minOf(INITIAL_QUEUE_BATCH - 1, order.size)
+            val initialItems = ArrayList<MediaItem>(initialEnd + 1)
+            val firstTrack = capped[index]
+            initialItems.add(toItemWithUid(firstTrack, artistOf(firstTrack), baseUid + index))
+            for (i in 0 until initialEnd) {
+                val pos = order[i]
+                val track = capped[pos]
+                initialItems.add(toItemWithUid(track, artistOf(track), baseUid + pos))
+            }
+            player.setMediaItems(initialItems, 0, 0L)
+            player.prepare()
+            player.play()
+            scheduleRemainingScrambled(gen, player, capped, order, initialEnd, baseUid, artistOf)
+        } else {
+            val winStart = maxOf(0, index - INITIAL_QUEUE_HALF_WINDOW)
+            val winEnd = minOf(total, index + INITIAL_QUEUE_HALF_WINDOW)
+            val initialItems = ArrayList<MediaItem>(winEnd - winStart)
+            for (i in winStart until winEnd) {
+                val track = capped[i]
+                initialItems.add(toItemWithUid(track, artistOf(track), baseUid + i))
+            }
+            player.setMediaItems(initialItems, index - winStart, 0L)
+            player.prepare()
+            player.play()
+            scheduleRemainingOrdered(gen, player, capped, winStart, winEnd, baseUid, artistOf)
+        }
+    }
+
+    private fun scheduleRemainingScrambled(
+        gen: Long,
+        player: MediaController,
+        tracks: List<Track>,
+        order: IntArray,
+        nextPos: Int,
+        baseUid: Long,
+        artistOf: (Track) -> String
+    ) {
+        if (nextPos >= order.size) return
+        main.postDelayed({
+            if (gen != queueLoadGeneration || controller !== player) return@postDelayed
+            val end = minOf(nextPos + QUEUE_CHUNK_SIZE, order.size)
+            val batch = ArrayList<MediaItem>(end - nextPos)
+            for (i in nextPos until end) {
+                val pos = order[i]
+                val track = tracks[pos]
+                batch.add(toItemWithUid(track, artistOf(track), baseUid + pos))
+            }
+            player.addMediaItems(batch)
+            scheduleRemainingScrambled(gen, player, tracks, order, end, baseUid, artistOf)
+        }, QUEUE_CHUNK_DELAY_MS)
+    }
+
+    private fun scheduleRemainingOrdered(
+        gen: Long,
+        player: MediaController,
+        tracks: List<Track>,
+        prependEnd: Int,
+        appendStart: Int,
+        baseUid: Long,
+        artistOf: (Track) -> String
+    ) {
+        if (prependEnd <= 0 && appendStart >= tracks.size) return
+        main.postDelayed({
+            if (gen != queueLoadGeneration || controller !== player) return@postDelayed
+            if (appendStart < tracks.size) {
+                val end = minOf(appendStart + QUEUE_CHUNK_SIZE, tracks.size)
+                val batch = ArrayList<MediaItem>(end - appendStart)
+                for (i in appendStart until end) {
+                    val track = tracks[i]
+                    batch.add(toItemWithUid(track, artistOf(track), baseUid + i))
+                }
+                player.addMediaItems(batch)
+                scheduleRemainingOrdered(gen, player, tracks, prependEnd, end, baseUid, artistOf)
+            } else {
+                val start = maxOf(0, prependEnd - QUEUE_CHUNK_SIZE)
+                val batch = ArrayList<MediaItem>(prependEnd - start)
+                for (i in start until prependEnd) {
+                    val track = tracks[i]
+                    batch.add(toItemWithUid(track, artistOf(track), baseUid + i))
+                }
+                player.addMediaItems(0, batch)
+                scheduleRemainingOrdered(gen, player, tracks, start, appendStart, baseUid, artistOf)
+            }
+        }, QUEUE_CHUNK_DELAY_MS)
     }
 
     /**
@@ -230,6 +331,7 @@ class PlayerConnection(context: Context, private val listener: NowPlayingListene
     fun playMix(steps: List<Pair<Track, MixSegment>>, startIndex: Int, artistOf: (Track) -> String) {
         val player = controller ?: return
         if (steps.isEmpty()) return
+        queueLoadGeneration++
         val items = steps.take(MAX_QUEUE).map { (track, segment) -> toItem(track, artistOf(track), segment) }
         val index = startIndex.coerceIn(0, items.size - 1)
         shuffleEnabled = false
@@ -308,7 +410,10 @@ class PlayerConnection(context: Context, private val listener: NowPlayingListene
 
     /** @param segment the part of the song to play in a mashup; null plays the whole song */
     private fun toItem(track: Track, artist: String, segment: MixSegment? = null): MediaItem {
-        val uid = nextUid++
+        return toItemWithUid(track, artist, nextUid++, segment)
+    }
+
+    private fun toItemWithUid(track: Track, artist: String, uid: Long, segment: MixSegment? = null): MediaItem {
         val extras = Bundle().apply {
             putLong(QueueCommands.EXTRA_UID, uid)
             if (segment != null) {
@@ -461,5 +566,9 @@ class PlayerConnection(context: Context, private val listener: NowPlayingListene
     private companion object {
         const val TAG = "PlayerConnection"
         const val MAX_QUEUE = 50000
+        const val INITIAL_QUEUE_BATCH = 64
+        const val INITIAL_QUEUE_HALF_WINDOW = 32
+        const val QUEUE_CHUNK_SIZE = 250
+        const val QUEUE_CHUNK_DELAY_MS = 32L
     }
 }

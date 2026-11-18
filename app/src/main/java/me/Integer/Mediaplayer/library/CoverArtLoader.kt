@@ -29,7 +29,7 @@ class CoverArtLoader(context: Context, private val targetPx: Int) {
     private val executor = ThreadPoolExecutor(
         1, 1, 0L, TimeUnit.MILLISECONDS,
         LinkedBlockingQueue(MAX_QUEUED),
-        { task -> Thread(task, "Mediaplayer-Cover").apply { isDaemon = true; priority = Thread.MIN_PRIORITY } },
+        { task -> Thread(task, "Mediaplayer-Cover").apply { isDaemon = true; priority = Thread.NORM_PRIORITY - 1 } },
         ThreadPoolExecutor.DiscardOldestPolicy()
     )
 

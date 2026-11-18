@@ -140,8 +140,10 @@ internal class MorphCardView(context: Context, private val scene: MorphScene) : 
     private val textPaint = TextPaint(Paint.ANTI_ALIAS_FLAG)
     private val coverBitmap: Bitmap? = scene.cover?.takeUnless { it.isRecycled }
     private val coverShader: BitmapShader? = coverBitmap?.let { BitmapShader(it, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP) }
+    private val shadowPaint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val coverMatrix = Matrix()
     private val card = RectF()
+    private val shadowRect = RectF()
     private val cover = RectF()
 
     private var progress = 0f
@@ -200,17 +202,40 @@ internal class MorphCardView(context: Context, private val scene: MorphScene) : 
     private fun drawBackground(canvas: Canvas, m: Float) {
         val lifted = scene.fromBackgroundAlpha + (1f - scene.fromBackgroundAlpha) * lift
         val visible = lerp(lifted, 1f, m)
+        val corner = lerp(lerp(scene.fromCorner, scene.liftCorner, lift), scene.toCorner, m)
+        val shadowStrength = lift * visible
+        if (shadowStrength > 0.01f) {
+            drawSoftShadow(canvas, corner, shadowStrength)
+        }
         val color = mixColor(scene.fromColor, scene.toColor, m)
         backgroundPaint.color = color
         backgroundPaint.alpha = (((color ushr 24) and 0xFF) * visible).roundToInt()
-        if (lift > 0f) {
-            val shadow = mixColor(0, SHADOW_COLOR, lift * visible)
-            backgroundPaint.setShadowLayer(SHADOW_DP * density * lift, 0f, SHADOW_DY_DP * density * lift, shadow)
-        } else {
-            backgroundPaint.clearShadowLayer()
-        }
-        val corner = lerp(lerp(scene.fromCorner, scene.liftCorner, lift), scene.toCorner, m)
         canvas.drawRoundRect(card, corner, corner, backgroundPaint)
+    }
+
+    /**
+     * Draws a multi-layered soft ambient/drop shadow using hardware-accelerated round rects
+     * instead of [Paint.setShadowLayer], avoiding per-frame Gaussian blur mask regeneration.
+     */
+    private fun drawSoftShadow(canvas: Canvas, corner: Float, strength: Float) {
+        val maxSpread = SHADOW_DP * density * lift
+        val dy = SHADOW_DY_DP * density * lift
+        shadowPaint.color = 0x000000
+        for (i in 0 until SHADOW_LAYERS) {
+            val fraction = (i + 1f) / SHADOW_LAYERS
+            val spread = maxSpread * fraction
+            val layerAlpha = (SHADOW_BASE_ALPHA * strength * (1f - fraction * 0.72f)).roundToInt().coerceIn(0, OPAQUE)
+            if (layerAlpha <= 0) continue
+            shadowPaint.alpha = layerAlpha
+            shadowRect.set(
+                card.left - spread,
+                card.top - spread * 0.6f + dy * fraction,
+                card.right + spread,
+                card.bottom + spread + dy * fraction
+            )
+            val r = corner + spread
+            canvas.drawRoundRect(shadowRect, r, r, shadowPaint)
+        }
     }
 
     private fun drawCover(canvas: Canvas, m: Float) {
@@ -232,25 +257,49 @@ internal class MorphCardView(context: Context, private val scene: MorphScene) : 
         canvas.drawRoundRect(cover, radius, radius, coverPaint)
     }
 
+    /**
+     * Draws text at a fixed canonical font size and scales the canvas to the interpolated
+     * size, keeping glyphs cached in the GPU font atlas instead of re-rasterizing every frame.
+     */
     private fun drawText(canvas: Canvas, part: TextPart, m: Float) {
-        textPaint.textSize = lerp(part.fromSize, part.toSize, m)
+        val currentSize = lerp(part.fromSize, part.toSize, m)
         val left = lerp(part.fromLeft, part.toLeft, m) + offsetX
         val baseline = lerp(part.fromBaseline, part.toBaseline, m) + offsetY
         val color = mixColor(part.fromColor, part.toColor, m)
         if (part.sameLook) {
-            drawVersion(canvas, part.toShown, part.toFace, color, 1f, left, baseline)
+            val baseSize = max(part.fromSize, part.toSize)
+            drawVersion(canvas, part.toShown, part.toFace, baseSize, currentSize, color, 1f, left, baseline)
             return
         }
-        drawVersion(canvas, part.fromShown, part.fromFace, color, 1f - m, left, baseline)
-        drawVersion(canvas, part.toShown, part.toFace, color, m, left, baseline)
+        drawVersion(canvas, part.fromShown, part.fromFace, part.fromSize, currentSize, color, 1f - m, left, baseline)
+        drawVersion(canvas, part.toShown, part.toFace, part.toSize, currentSize, color, m, left, baseline)
     }
 
-    private fun drawVersion(canvas: Canvas, text: String, face: Typeface, color: Int, share: Float, x: Float, y: Float) {
-        if (share <= 0f || text.isEmpty()) return
+    private fun drawVersion(
+        canvas: Canvas,
+        text: String,
+        face: Typeface,
+        baseSize: Float,
+        targetSize: Float,
+        color: Int,
+        share: Float,
+        x: Float,
+        y: Float
+    ) {
+        if (share <= 0f || text.isEmpty() || baseSize <= 0f) return
         textPaint.typeface = face
+        textPaint.textSize = baseSize
         textPaint.color = color
         textPaint.alpha = (((color ushr 24) and 0xFF) * share).roundToInt()
-        canvas.drawText(text, x, y, textPaint)
+        val scale = targetSize / baseSize
+        if (kotlin.math.abs(scale - 1f) < 0.001f) {
+            canvas.drawText(text, x, y, textPaint)
+        } else {
+            val saved = canvas.save()
+            canvas.scale(scale, scale, x, y)
+            canvas.drawText(text, x, y, textPaint)
+            canvas.restoreToCount(saved)
+        }
     }
 
     /** Icons ride along with the card, keeping their place relative to its edges. */
@@ -297,9 +346,10 @@ internal class MorphCardView(context: Context, private val scene: MorphScene) : 
     }
 
     private companion object {
-        const val SHADOW_DP = 18f
+        const val SHADOW_DP = 16f
         const val SHADOW_DY_DP = 6f
-        const val SHADOW_COLOR = 0x80000000.toInt()
+        const val SHADOW_LAYERS = 4
+        const val SHADOW_BASE_ALPHA = 38
         const val ICON_OUT_END = 0.35f
         const val ICON_IN_START = 0.55f
         const val OPAQUE = 255

@@ -63,6 +63,7 @@ internal class SongLaunch(
     private var card: MorphCardView? = null
     private var fadingCard: View? = null
     private var hiddenRow: View? = null
+    private var pendingTriggered = false
 
     // The flight path, in layer coordinates: card centres at the start, the top of the hop and the end.
     private var fromX = 0f
@@ -80,6 +81,7 @@ internal class SongLaunch(
     fun launch(list: RecyclerView, row: Int, play: () -> Unit) {
         cancel(runPending = false)
         pendingPlay = play
+        pendingTriggered = false
         this.list = list
         this.row = row
         trackUri = (list.adapter as? TrackAdapter)?.rows()?.getOrNull(row)?.uri.orEmpty()
@@ -221,7 +223,6 @@ internal class SongLaunch(
         toY = spots.card.centerY()
         apexY = fromY - HOP_DP * density
         tiltSign = if (toX < fromX) -1f else 1f
-        runPending()
         phase = Phase.FLYING
         phaseStart = clock
         fly()
@@ -289,12 +290,20 @@ internal class SongLaunch(
             scale,
             tilt
         )
+        if (!pendingTriggered && t >= PLAY_TRIGGER_DELAY_MS) {
+            pendingTriggered = true
+            runPending()
+        }
         if (fall >= 1f) land()
     }
 
     // ------------------------------------------------------------------ landing
 
     private fun land() {
+        if (!pendingTriggered) {
+            pendingTriggered = true
+            runPending()
+        }
         phase = Phase.LANDED
         phaseStart = clock
         squash.reset(0f, IMPACT_VELOCITY, 0f)
@@ -315,8 +324,9 @@ internal class SongLaunch(
 
     private fun isBarReady(): Boolean {
         val state = host.nowPlaying
-        if (!state.active || !host.isArtResolved) return false
-        return trackUri.isEmpty() || state.trackUri == trackUri
+        if (!state.active) return false
+        val uriMatches = trackUri.isEmpty() || state.trackUri == trackUri
+        return uriMatches && host.isArtResolved
     }
 
     /** The real bar appears under the card, the card fades off it, and the row returns. */
@@ -377,14 +387,15 @@ internal class SongLaunch(
     private fun smooth(x: Float): Float = x * x * (3f - 2f * x)
 
     private companion object {
-        const val ROW_WAIT_MS = 450L
-        const val COVER_WAIT_MS = 550L
-        const val BAR_WAIT_MS = 1500L
-        const val SQUASH_MAX_MS = 520L
-        const val HANDOVER_FADE_MS = 150L
-        const val HANDOVER_TO_EXPAND_MS = 170L
-        const val ROW_RETURN_MS = 220L
+        const val ROW_WAIT_MS = 300L
+        const val COVER_WAIT_MS = 120L
+        const val BAR_WAIT_MS = 220L
+        const val SQUASH_MAX_MS = 340L
+        const val HANDOVER_FADE_MS = 110L
+        const val HANDOVER_TO_EXPAND_MS = 40L
+        const val ROW_RETURN_MS = 200L
         const val MAX_FRAME_SECONDS = 0.05f
+        const val PLAY_TRIGGER_DELAY_MS = 32f
 
         const val LIFT_MS = 160f
         const val HOP_DELAY_MS = 70f

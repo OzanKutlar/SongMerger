@@ -95,7 +95,10 @@ class MainActivity : AppCompatActivity(), PlayerHost, Navigator, NowPlayingListe
                 .replace(R.id.mainContainer, LibraryFragment())
                 .commitNow()
         }
-        window.decorView.post { repository.loadIfNeeded() }
+        window.decorView.post {
+            repository.loadIfNeeded()
+            expander.warmUp()
+        }
         if (savedInstanceState == null && wantsPlayer(intent)) pendingOpenPlayer = true
     }
 
