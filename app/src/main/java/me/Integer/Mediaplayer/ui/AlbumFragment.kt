@@ -20,6 +20,7 @@ class AlbumFragment : Fragment(R.layout.fragment_artist), LibraryRepository.List
     private lateinit var host: PlayerHost
     private lateinit var adapter: TrackAdapter
     private lateinit var countView: TextView
+    private lateinit var list: RecyclerView
     private var albumName = ""
     private var tracks: List<Track> = emptyList()
 
@@ -36,11 +37,11 @@ class AlbumFragment : Fragment(R.layout.fragment_artist), LibraryRepository.List
         adapter = TrackAdapter(
             thumbnails = ThumbnailLoader.get(requireContext()),
             artistLine = { track -> repository.displayArtist(track).ifEmpty { getString(R.string.library_unknown_artist) } },
-            onClick = { index -> host.playTracks(tracks, index) },
+            onClick = { index -> host.launchRow(list, tracks, index) },
             onPlayNext = { track -> TrackMenu.playNext(requireContext(), track, host, repository) },
             onMenu = { track, anchor -> TrackMenu.show(anchor, track, host, repository) }
         )
-        val list = view.findViewById<RecyclerView>(R.id.artistList)
+        list = view.findViewById(R.id.artistList)
         list.layoutManager = LinearLayoutManager(requireContext())
         list.adapter = adapter
     }
@@ -50,8 +51,8 @@ class AlbumFragment : Fragment(R.layout.fragment_artist), LibraryRepository.List
         val play = view.findViewById<View>(R.id.artistPlayAll)
         PressFeedback.attach(shuffle, null, ROUND_PRESS_SCALE)
         PressFeedback.attach(play, null, ROUND_PRESS_SCALE)
-        shuffle.setOnClickListener { host.playAll(tracks, true) }
-        play.setOnClickListener { host.playAll(tracks, false) }
+        shuffle.setOnClickListener { host.launchAll(list, tracks, true) }
+        play.setOnClickListener { host.launchAll(list, tracks, false) }
     }
 
     override fun onStart() {

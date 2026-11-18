@@ -167,7 +167,7 @@ class LibraryFragment : Fragment(R.layout.fragment_library), LibraryRepository.L
         trackAdapter = TrackAdapter(
             thumbnails = thumbnails,
             artistLine = { artistLineOf(it) },
-            onClick = { index -> host.playTracks(visibleTracks, index) },
+            onClick = { index -> host.launchRow(list, visibleTracks, index) },
             onPlayNext = { track -> TrackMenu.playNext(requireContext(), track, host, repository) },
             onMenu = { track, anchor -> TrackMenu.show(anchor, track, host, repository) }
         )
@@ -201,8 +201,8 @@ class LibraryFragment : Fragment(R.layout.fragment_library), LibraryRepository.L
         }
         PressFeedback.attach(shuffleButton, null, ROUND_PRESS_SCALE)
         PressFeedback.attach(playAllButton, null, ROUND_PRESS_SCALE)
-        shuffleButton.setOnClickListener { host.playAll(visibleTracks, true) }
-        playAllButton.setOnClickListener { host.playAll(visibleTracks, false) }
+        shuffleButton.setOnClickListener { host.launchAll(list, visibleTracks, true) }
+        playAllButton.setOnClickListener { host.launchAll(list, visibleTracks, false) }
     }
 
     // ------------------------------------------------------------------ header actions

@@ -7,11 +7,13 @@ import android.graphics.Bitmap
 import android.os.Build
 import android.os.Bundle
 import android.util.Log
+import android.widget.FrameLayout
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.Fragment
 import androidx.fragment.app.FragmentManager
+import androidx.recyclerview.widget.RecyclerView
 import me.Integer.Mediaplayer.library.CoverArtLoader
 import me.Integer.Mediaplayer.library.LibraryRepository
 import me.Integer.Mediaplayer.library.MixSegment
@@ -25,10 +27,12 @@ import me.Integer.Mediaplayer.ui.LibraryFragment
 import me.Integer.Mediaplayer.ui.MiniPlayerBar
 import me.Integer.Mediaplayer.ui.Navigator
 import me.Integer.Mediaplayer.ui.NowPlayingFragment
+import me.Integer.Mediaplayer.ui.PlayerExpand
 import me.Integer.Mediaplayer.ui.PlayerHost
 import me.Integer.Mediaplayer.ui.PlaylistFragment
 import me.Integer.Mediaplayer.ui.QueueFragment
 import me.Integer.Mediaplayer.ui.SettingsFragment
+import me.Integer.Mediaplayer.ui.SongLaunch
 import kotlin.math.roundToInt
 import kotlin.random.Random
 
@@ -41,6 +45,8 @@ class MainActivity : AppCompatActivity(), PlayerHost, Navigator, NowPlayingListe
     private lateinit var repository: LibraryRepository
     private lateinit var artLoader: CoverArtLoader
     private lateinit var miniBar: MiniPlayerBar
+    private lateinit var songLaunch: SongLaunch
+    private lateinit var expander: PlayerExpand
     private val listeners = ArrayList<PlayerHost.Listener>()
 
     /** A notification tap asked for the player; it opens once the activity is resumed. */
@@ -79,6 +85,9 @@ class MainActivity : AppCompatActivity(), PlayerHost, Navigator, NowPlayingListe
         connection = PlayerConnection(this, this)
         artLoader = CoverArtLoader(this, (ART_SIZE_DP * resources.displayMetrics.density).roundToInt())
         miniBar = MiniPlayerBar(findViewById(R.id.miniBar), this, this)
+        val launchLayer = findViewById<FrameLayout>(R.id.launchLayer)
+        expander = PlayerExpand(launchLayer, miniBar)
+        songLaunch = SongLaunch(launchLayer, miniBar) { openNowPlaying() }
         supportFragmentManager.registerFragmentLifecycleCallbacks(screenWatcher, false)
         if (savedInstanceState == null) {
             supportFragmentManager.beginTransaction()
@@ -117,6 +126,8 @@ class MainActivity : AppCompatActivity(), PlayerHost, Navigator, NowPlayingListe
     }
 
     override fun onStop() {
+        songLaunch.cancel(runPending = true)
+        expander.cancel()
         miniBar.stop()
         connection.release()
         super.onStop()
@@ -143,10 +154,18 @@ class MainActivity : AppCompatActivity(), PlayerHost, Navigator, NowPlayingListe
         connection.playTracks(tracks, startIndex) { repository.displayArtist(it) }
     }
 
-    override fun playAll(tracks: List<Track>, shuffle: Boolean) {
+    override fun launchFromList(list: RecyclerView, row: Int, play: () -> Unit) {
+        songLaunch.launch(list, row, play)
+    }
+
+    override fun playAll(tracks: List<Track>, shuffle: Boolean, startIndex: Int) {
         if (tracks.isEmpty()) return
         ensureNotificationPermission()
-        val start = if (shuffle) Random.nextInt(tracks.size) else 0
+        val start = when {
+            startIndex in tracks.indices -> startIndex
+            shuffle -> Random.nextInt(tracks.size)
+            else -> 0
+        }
         connection.playTracks(tracks, start, shuffle) { repository.displayArtist(it) }
     }
 
@@ -201,28 +220,30 @@ class MainActivity : AppCompatActivity(), PlayerHost, Navigator, NowPlayingListe
 
     // ------------------------------------------------------------------ navigation
 
+    /** Grows the mini player into the full player when it is on screen; slides up otherwise. */
     override fun openNowPlaying() {
-        open(KEY_PLAYER, true) { NowPlayingFragment() }
+        if (expander.expand { open(KEY_PLAYER, STYLE_REVEAL) { NowPlayingFragment() } }) return
+        open(KEY_PLAYER, STYLE_SHEET) { NowPlayingFragment() }
     }
 
     override fun openArtist(name: String) {
-        open(KEY_ARTIST + name.lowercase(), false) { ArtistFragment.create(name) }
+        open(KEY_ARTIST + name.lowercase(), STYLE_SIDE) { ArtistFragment.create(name) }
     }
 
     override fun openAlbum(albumName: String) {
-        open(KEY_ALBUM + albumName.lowercase(), false) { AlbumFragment.create(albumName) }
+        open(KEY_ALBUM + albumName.lowercase(), STYLE_SIDE) { AlbumFragment.create(albumName) }
     }
 
     override fun openPlaylist(playlistId: Long) {
-        open(KEY_PLAYLIST + playlistId, false) { PlaylistFragment.create(playlistId) }
+        open(KEY_PLAYLIST + playlistId, STYLE_SIDE) { PlaylistFragment.create(playlistId) }
     }
 
     override fun openQueue() {
-        open(KEY_QUEUE, false) { QueueFragment() }
+        open(KEY_QUEUE, STYLE_SIDE) { QueueFragment() }
     }
 
     override fun openSettings() {
-        open(KEY_SETTINGS, false) { SettingsFragment() }
+        open(KEY_SETTINGS, STYLE_SIDE) { SettingsFragment() }
     }
 
     override fun goBack() {
@@ -233,28 +254,35 @@ class MainActivity : AppCompatActivity(), PlayerHost, Navigator, NowPlayingListe
      * Shows a screen once. If [key] is already on the back stack, the screens above it are
      * closed and that one comes back to the front, instead of a second copy being stacked.
      *
-     * @param slideUp true for the player, which rises from the bottom; other screens slide sideways
+     * @param style [STYLE_SIDE] slides sideways, [STYLE_SHEET] rises from the bottom, and
+     *     [STYLE_REVEAL] appears at once under the card growing out of the mini player.
+     *     Leaving the player always slides it down.
+     * @return false when screens cannot change right now
      */
-    private fun open(key: String, slideUp: Boolean, create: () -> Fragment) {
+    private fun open(key: String, style: Int, create: () -> Fragment): Boolean {
         val manager = supportFragmentManager
-        if (manager.isStateSaved) return
+        if (manager.isStateSaved) return false
         if (isOnBackStack(key)) {
             manager.popBackStack(key, 0)
-            return
+            return true
         }
         val transaction = manager.beginTransaction().setReorderingAllowed(true)
-        if (slideUp) {
-            transaction.setCustomAnimations(
+        when (style) {
+            STYLE_SHEET -> transaction.setCustomAnimations(
                 R.anim.sheet_enter, R.anim.screen_hold,
                 R.anim.screen_hold, R.anim.sheet_exit
             )
-        } else {
-            transaction.setCustomAnimations(
+            STYLE_REVEAL -> transaction.setCustomAnimations(
+                0, R.anim.screen_hold,
+                R.anim.screen_hold, R.anim.sheet_exit
+            )
+            else -> transaction.setCustomAnimations(
                 R.anim.screen_enter, R.anim.screen_exit,
                 R.anim.screen_pop_enter, R.anim.screen_pop_exit
             )
         }
         transaction.replace(R.id.mainContainer, create()).addToBackStack(key).commit()
+        return true
     }
 
     private fun isOnBackStack(key: String): Boolean {
@@ -279,5 +307,10 @@ class MainActivity : AppCompatActivity(), PlayerHost, Navigator, NowPlayingListe
         private const val KEY_ARTIST = "artist:"
         private const val KEY_ALBUM = "album:"
         private const val KEY_PLAYLIST = "playlist:"
+
+        // How a screen comes in.
+        private const val STYLE_SIDE = 0
+        private const val STYLE_SHEET = 1
+        private const val STYLE_REVEAL = 2
     }
 }

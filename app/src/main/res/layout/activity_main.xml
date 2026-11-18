@@ -27,7 +27,7 @@
         android:orientation="horizontal"
         android:paddingStart="8dp"
         android:paddingEnd="4dp"
-        android:visibility="gone">
+        android:visibility="invisible">
 
         <me.Integer.Mediaplayer.ui.widgets.VinylDiscView
             android:id="@+id/miniVinyl"
@@ -116,5 +116,14 @@
                 android:tint="#FFFFFF" />
         </FrameLayout>
     </LinearLayout>
+
+    <!-- Song launch animations: the falling cover and the card that grows into the player.
+         It only takes touches while the card is growing. -->
+    <FrameLayout
+        android:id="@+id/launchLayer"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:clipChildren="false"
+        android:elevation="12dp" />
 
 </FrameLayout>

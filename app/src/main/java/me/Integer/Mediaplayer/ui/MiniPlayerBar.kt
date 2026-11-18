@@ -2,11 +2,13 @@ package me.Integer.Mediaplayer.ui
 
 import android.animation.ValueAnimator
 import android.graphics.Bitmap
+import android.graphics.RectF
 import android.graphics.drawable.GradientDrawable
 import android.os.SystemClock
 import android.view.View
 import android.view.animation.AccelerateInterpolator
 import android.view.animation.DecelerateInterpolator
+import android.view.animation.OvershootInterpolator
 import android.widget.ImageView
 import android.widget.TextView
 import me.Integer.Mediaplayer.R
@@ -14,10 +16,15 @@ import me.Integer.Mediaplayer.playback.SkipOutcome
 import me.Integer.Mediaplayer.ui.widgets.MarqueeTextView
 import me.Integer.Mediaplayer.ui.widgets.PressFeedback
 import me.Integer.Mediaplayer.ui.widgets.VinylDiscView
+import me.Integer.Mediaplayer.ui.widgets.ViewGeometry
 
 /**
  * The floating mini player: a rounded bar tinted by the cover, with a small spinning disc,
- * the song and previous / play / next. Tapping the bar opens the full player. Main thread only.
+ * the song and previous / play / next. Tapping the bar opens the full player.
+ *
+ * It also takes part in the song launch: it can wait hidden while a cover falls towards it,
+ * squash when the cover lands, and hand its bounds and colour to the card that grows into
+ * the full player. Main thread only.
  */
 class MiniPlayerBar(
     private val bar: View,
@@ -48,6 +55,21 @@ class MiniPlayerBar(
     private var shown = false
     private var iconPlaying: Boolean? = null
 
+    /** A cover is falling towards the bar: a hidden bar waits for it, and the disc is hidden. */
+    private var held = false
+
+    /** The bar's corner radius, for the card that grows from it. */
+    val cornerPx: Float
+        get() = CORNER_DP * density
+
+    /** The cover tint shown right now. */
+    val color: Int
+        get() = shownColor
+
+    /** True while the bar can be seen. */
+    val isOnScreen: Boolean
+        get() = shown && bar.isShown && bar.alpha > 0f
+
     init {
         bar.background = shape
         bar.setOnClickListener { navigator.openNowPlaying() }
@@ -70,7 +92,8 @@ class MiniPlayerBar(
 
     fun render() {
         val state = host.nowPlaying
-        setShown(state.active && !suppressed)
+        val wanted = state.active && !suppressed
+        setShown(wanted && (shown || !held))
         if (!state.active) {
             vinyl.setPlaying(false)
             return
@@ -93,6 +116,77 @@ class MiniPlayerBar(
         settlePlayIcon()
         colorAnimator?.end()
         colorAnimator = null
+    }
+
+    // ------------------------------------------------------------------ song launch
+
+    /** The bar in the coordinates of [layer]. */
+    fun boundsIn(layer: View, out: RectF): Boolean {
+        return ViewGeometry.rectIn(bar, layer, out)
+    }
+
+    /** Where the disc is drawn when the bar is at rest, in the coordinates of [layer]. */
+    fun discRectIn(layer: View, out: RectF): Boolean {
+        if (!ViewGeometry.rectIn(vinyl, layer, out)) return false
+        // A hidden bar waits lower down; the cover lands where the bar will rest.
+        out.offset(0f, -bar.translationY)
+        val inset = out.width() * (1f - DISC_SHARE) / 2f
+        out.inset(inset, inset)
+        return true
+    }
+
+    /** A cover is on its way: hide the disc, and keep a hidden bar hidden until it lands. */
+    fun holdForLanding() {
+        held = true
+        vinyl.animate().cancel()
+        vinyl.alpha = 0f
+    }
+
+    /** The launch was called off: everything goes back to normal. */
+    fun releaseHold() {
+        if (!held) return
+        held = false
+        vinyl.alpha = 1f
+        render()
+    }
+
+    /** The cover landed: the bar appears at once if needed, squashes, and the disc pops. */
+    fun land() {
+        held = false
+        vinyl.alpha = 1f
+        val wanted = host.nowPlaying.active && !suppressed
+        if (wanted && !shown) {
+            shown = true
+            bar.animate().cancel()
+            bar.visibility = View.VISIBLE
+            bar.alpha = 1f
+            bar.translationY = 0f
+        }
+        render()
+        if (shown) squash()
+    }
+
+    /** The card growing into the player covers the bar exactly, so the bar steps aside. */
+    fun hideForExpand() {
+        bar.alpha = 0f
+    }
+
+    /** The growing card was called off before the player opened. */
+    fun restoreAfterExpand() {
+        if (shown) bar.alpha = 1f
+    }
+
+    private fun squash() {
+        bar.pivotX = bar.width / 2f
+        bar.pivotY = bar.height.toFloat()
+        bar.scaleX = SQUASH_X
+        bar.scaleY = SQUASH_Y
+        bar.animate().scaleX(1f).scaleY(1f)
+            .setDuration(SQUASH_MS).setInterpolator(OvershootInterpolator(SQUASH_TENSION)).start()
+        vinyl.scaleX = DISC_POP
+        vinyl.scaleY = DISC_POP
+        vinyl.animate().scaleX(1f).scaleY(1f)
+            .setDuration(SQUASH_MS).setInterpolator(OvershootInterpolator(SQUASH_TENSION)).start()
     }
 
     // ------------------------------------------------------------------ actions
@@ -176,10 +270,13 @@ class MiniPlayerBar(
         shape.setColor(color)
     }
 
+    /** Hidden means invisible rather than gone, so the bar keeps its place as a landing target. */
     private fun setShown(show: Boolean) {
         if (show == shown) return
         shown = show
         bar.animate().cancel()
+        bar.scaleX = 1f
+        bar.scaleY = 1f
         val offset = HIDE_OFFSET_DP * density
         if (show) {
             bar.visibility = View.VISIBLE
@@ -190,7 +287,7 @@ class MiniPlayerBar(
         } else {
             bar.animate().alpha(0f).translationY(offset)
                 .setDuration(HIDE_MS).setInterpolator(AccelerateInterpolator())
-                .withEndAction { if (!shown) bar.visibility = View.GONE }
+                .withEndAction { if (!shown) bar.visibility = View.INVISIBLE }
                 .start()
         }
     }
@@ -203,5 +300,13 @@ class MiniPlayerBar(
         const val TINT_MS = 450L
         const val MORPH_SCALE = 0.4f
         const val MORPH_HALF_MS = 90L
+        const val SQUASH_X = 1.04f
+        const val SQUASH_Y = 0.9f
+        const val SQUASH_MS = 360L
+        const val SQUASH_TENSION = 2.5f
+        const val DISC_POP = 1.25f
+
+        /** The disc's drawn diameter as a share of its view (VinylDiscView's radius fraction × 2). */
+        const val DISC_SHARE = 0.87f
     }
 }

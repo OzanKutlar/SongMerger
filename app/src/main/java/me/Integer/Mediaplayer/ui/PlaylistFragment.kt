@@ -111,9 +111,14 @@ class PlaylistFragment : Fragment(R.layout.fragment_playlist), LibraryRepository
         coverFrame.setOnClickListener { changeCover() }
         view.findViewById<View>(R.id.playlistBack).setOnClickListener { navigator.goBack() }
         view.findViewById<View>(R.id.playlistMore).setOnClickListener { showMoreMenu(it) }
-        shuffleButton.setOnClickListener { host.playAll(tracks, true) }
+        shuffleButton.setOnClickListener { host.launchAll(list, tracks, true) }
         playButton.setOnClickListener {
-            if (mix.isEmpty()) host.playAll(tracks, false) else host.playMix(mix, 0)
+            if (mix.isEmpty()) {
+                host.launchAll(list, tracks, false)
+            } else {
+                val firstRow = tracks.indexOfFirst { it.uri == mix.first().trackUri }.coerceAtLeast(0)
+                host.launchFromList(list, firstRow) { host.playMix(mix, 0) }
+            }
         }
     }
 
@@ -155,11 +160,11 @@ class PlaylistFragment : Fragment(R.layout.fragment_playlist), LibraryRepository
     private fun playRow(index: Int) {
         val track = tracks.getOrNull(index) ?: return
         if (mix.isEmpty()) {
-            host.playTracks(tracks, index)
+            host.launchRow(list, tracks, index)
             return
         }
-        val step = mix.indexOfFirst { it.trackUri == track.uri }
-        host.playMix(mix, step.coerceAtLeast(0))
+        val step = mix.indexOfFirst { it.trackUri == track.uri }.coerceAtLeast(0)
+        host.launchFromList(list, index) { host.playMix(mix, step) }
     }
 
     private fun artistLineOf(track: Track): String {
