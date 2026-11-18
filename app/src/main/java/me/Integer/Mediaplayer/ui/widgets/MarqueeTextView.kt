@@ -8,6 +8,7 @@ import android.graphics.Typeface
 import android.text.TextPaint
 import android.util.AttributeSet
 import android.util.TypedValue
+import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
 import kotlin.math.ceil
@@ -19,7 +20,9 @@ import kotlin.math.roundToInt
  * from the right. Unlike TextView's marquee it only restarts when the text changes,
  * never because something else in the layout was re-measured.
  *
- * Reads android:textSize, android:textStyle and android:textColor from XML.
+ * Reads android:textSize, android:textStyle, android:textColor, android:gravity and
+ * android:fontFamily from XML. With a centred gravity, text that fits is drawn centred;
+ * scrolling text always starts from the left.
  */
 class MarqueeTextView @JvmOverloads constructor(
     context: Context,
@@ -32,6 +35,7 @@ class MarqueeTextView @JvmOverloads constructor(
     private val speedPx: Float
     private val ascent: Float
     private val descent: Float
+    private val centered: Boolean
 
     private var content = ""
     private var textWidth = 0f
@@ -53,19 +57,24 @@ class MarqueeTextView @JvmOverloads constructor(
         var size = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, DEFAULT_TEXT_SP, resources.displayMetrics)
         var style = Typeface.NORMAL
         var color = Color.WHITE
+        var gravity = Gravity.START
+        var family: String? = null
         if (attrs != null) {
             val values = context.obtainStyledAttributes(attrs, TEXT_ATTRS)
             try {
                 size = values.getDimension(ATTR_SIZE, size)
                 style = values.getInt(ATTR_STYLE, style)
                 color = values.getColor(ATTR_COLOR, color)
+                gravity = values.getInt(ATTR_GRAVITY, gravity)
+                family = values.getString(ATTR_FONT_FAMILY)
             } finally {
                 values.recycle()
             }
         }
         paint.textSize = size
         paint.color = color
-        paint.typeface = if (style and STYLE_BOLD != 0) Typeface.DEFAULT_BOLD else Typeface.DEFAULT
+        paint.typeface = typefaceOf(family, style and STYLE_BOLD != 0)
+        centered = (gravity and Gravity.HORIZONTAL_GRAVITY_MASK) == Gravity.CENTER_HORIZONTAL
         val metrics = paint.fontMetrics
         ascent = metrics.ascent
         descent = metrics.descent
@@ -132,7 +141,8 @@ class MarqueeTextView @JvmOverloads constructor(
         val right = width - paddingRight
         val contentHeight = (height - paddingTop - paddingBottom).toFloat()
         val baseline = paddingTop + (contentHeight - (descent - ascent)) / 2f - ascent
-        val x = left - offset
+        val start = if (centered && !overflowing) left + (right - left - textWidth) / 2f else left.toFloat()
+        val x = start - offset
         canvas.save()
         canvas.clipRect(left, 0, right, height)
         canvas.drawText(content, x, baseline, paint)
@@ -207,15 +217,19 @@ class MarqueeTextView @JvmOverloads constructor(
     }
 
     private companion object {
-        // Must stay sorted by attribute id: textSize < textStyle < textColor.
+        // Must stay sorted by attribute id: textSize < textStyle < textColor < gravity < fontFamily.
         val TEXT_ATTRS = intArrayOf(
             android.R.attr.textSize,
             android.R.attr.textStyle,
-            android.R.attr.textColor
+            android.R.attr.textColor,
+            android.R.attr.gravity,
+            android.R.attr.fontFamily
         )
         const val ATTR_SIZE = 0
         const val ATTR_STYLE = 1
         const val ATTR_COLOR = 2
+        const val ATTR_GRAVITY = 3
+        const val ATTR_FONT_FAMILY = 4
         const val STYLE_BOLD = 1
 
         const val DEFAULT_TEXT_SP = 22f
@@ -226,5 +240,11 @@ class MarqueeTextView @JvmOverloads constructor(
         const val NANOS_PER_MILLI = 1000000L
         const val NANOS_PER_SECOND = 1e9f
         const val MAX_FRAME_SECONDS = 0.1f
+
+        /** A named family such as sans-serif-medium, or the default font. */
+        fun typefaceOf(family: String?, bold: Boolean): Typeface {
+            if (family.isNullOrEmpty()) return if (bold) Typeface.DEFAULT_BOLD else Typeface.DEFAULT
+            return Typeface.create(family, if (bold) Typeface.BOLD else Typeface.NORMAL)
+        }
     }
 }

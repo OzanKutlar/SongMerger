@@ -1,4 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- Near-black, with the player's warm glow rising from the bottom. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:aapt="http://schemas.android.com/aapt"
     android:width="108dp"
@@ -6,39 +7,37 @@
     android:viewportWidth="108"
     android:viewportHeight="108">
 
-    <!-- Rich diagonal modern orange gradient base -->
-    <path android:pathData="M0,0h108v108h-108z">
-        <aapt:attr name="android:fillColor">
-            <gradient
-                android:startX="12"
-                android:startY="8"
-                android:endX="96"
-                android:endY="100"
-                android:type="linear">
-                <item android:offset="0.0" android:color="#FFFFA726" />
-                <item android:offset="0.48" android:color="#FFFF6D00" />
-                <item android:offset="1.0" android:color="#FFD83400" />
-            </gradient>
-        </aapt:attr>
-    </path>
-
-    <!-- Warm upper-left radial glow -->
-    <path android:pathData="M0,0h108v108h-108z">
-        <aapt:attr name="android:fillColor">
-            <gradient
-                android:centerX="28"
-                android:centerY="24"
-                android:gradientRadius="64"
-                android:type="radial">
-                <item android:offset="0.0" android:color="#66FFF3E0" />
-                <item android:offset="0.6" android:color="#1AFFAB40" />
-                <item android:offset="1.0" android:color="#00FF6D00" />
-            </gradient>
-        </aapt:attr>
-    </path>
-
-    <!-- Sleek geometric corner sheen -->
     <path
-        android:fillColor="#18FFFFFF"
-        android:pathData="M0,0L108,0L108,42L0,78Z" />
+        android:fillColor="#FF0B090B"
+        android:pathData="M0,0h108v108h-108z" />
+
+    <!-- Faint plum light in the lower left -->
+    <path android:pathData="M0,0h108v108h-108z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:centerX="18"
+                android:centerY="112"
+                android:gradientRadius="56"
+                android:type="radial">
+                <item android:offset="0.0" android:color="#7A6A1E48" />
+                <item android:offset="0.55" android:color="#2A3A1030" />
+                <item android:offset="1.0" android:color="#000B090B" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- Warm ember glow from the bottom centre -->
+    <path android:pathData="M0,0h108v108h-108z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:centerX="62"
+                android:centerY="120"
+                android:gradientRadius="74"
+                android:type="radial">
+                <item android:offset="0.0" android:color="#C2E2600A" />
+                <item android:offset="0.42" android:color="#5C8A2C0A" />
+                <item android:offset="1.0" android:color="#000B090B" />
+            </gradient>
+        </aapt:attr>
+    </path>
 </vector>

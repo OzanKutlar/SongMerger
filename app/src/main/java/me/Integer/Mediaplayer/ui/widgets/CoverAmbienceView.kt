@@ -170,18 +170,27 @@ class CoverAmbienceView @JvmOverloads constructor(
         val t = driftTime
         for (b in 0 until BLOBS) {
             val phase = PHASES[b]
-            blobX[b] = BASE_X[b] + SWING_X[b] * sin(t * FREQ_X[b] + phase).toFloat()
-            blobY[b] = BASE_Y[b] + SWING_Y[b] * sin(t * FREQ_Y[b] + phase * PHASE_Y).toFloat()
+            blobX[b] = BASE_X[b] + SWING_X[b] * wander(t, FREQ_X[b], phase)
+            blobY[b] = BASE_Y[b] + SWING_Y[b] * wander(t, FREQ_Y[b], phase * PHASE_Y)
             val radius = BASE_R[b] * (1f + RADIUS_SWING * sin(t * FREQ_R[b] + phase * PHASE_R).toFloat())
             blobRadius2[b] = radius * radius
             val mix = 0.5f + 0.5f * sin(t * FREQ_C[b] + phase * PHASE_C).toFloat()
             val from = COLOR_A[b] * 3
             val to = COLOR_B[b] * 3
-            val strength = STRENGTH[b]
+            // Each blob also fades in and out on its own, so patches of light come and go.
+            val pulse = 0.5f + 0.5f * sin(t * FREQ_I[b] + phase * PHASE_I).toFloat()
+            val strength = STRENGTH[b] * (MIN_INTENSITY + (1f - MIN_INTENSITY) * pulse)
             blobRed[b] = lerp(palette[from], palette[to], mix) * strength
             blobGreen[b] = lerp(palette[from + 1], palette[to + 1], mix) * strength
             blobBlue[b] = lerp(palette[from + 2], palette[to + 2], mix) * strength
         }
+    }
+
+    /** Two sines at unrelated speeds: a path in -1..1 that never visibly repeats. */
+    private fun wander(t: Double, freq: Double, phase: Double): Float {
+        val main = sin(t * freq + phase)
+        val detail = sin(t * freq * WANDER_RATIO + phase * PHASE_DETAIL)
+        return (WANDER_MAIN * main + WANDER_DETAIL * detail).toFloat()
     }
 
     private fun blendPalette(now: Long) {
@@ -336,16 +345,24 @@ class CoverAmbienceView @JvmOverloads constructor(
         const val BASE_GREEN = 6
         const val BASE_BLUE = 8
         const val MAX_CHANNEL = 255
-        const val GAIN = 1.5f
+        const val GAIN = 1.15f
 
         /** The glow fades in from this height (0 = top) and is full at the bottom edge. */
-        const val MASK_START = 0.3f
+        const val MASK_START = 0.22f
         const val MASK_END = 1f
         const val DEFAULT_ASPECT = 2f
         const val RADIUS_SWING = 0.14f
         const val PHASE_Y = 1.7
         const val PHASE_R = 0.6
         const val PHASE_C = 2.3
+        const val PHASE_I = 3.1
+        const val PHASE_DETAIL = 1.9
+        const val WANDER_MAIN = 0.68
+        const val WANDER_DETAIL = 0.32
+        const val WANDER_RATIO = 2.37
+
+        /** The faintest a blob gets while fading; 1 would never fade. */
+        const val MIN_INTENSITY = 0.3f
         const val PALETTE_NANOS = 900000000L
         const val FRAME_DELAY_MS = 33L
         const val MAX_FRAME_SECONDS = 0.1f
@@ -363,27 +380,29 @@ class CoverAmbienceView @JvmOverloads constructor(
         const val MAX_SATURATION = 0.85f
 
         // Blob layout in view units: x across the width, y down the height, radius in widths.
-        val BASE_X = floatArrayOf(0.12f, 0.88f, 0.5f, 0.3f)
-        val BASE_Y = floatArrayOf(0.98f, 0.94f, 1.08f, 0.82f)
-        val BASE_R = floatArrayOf(0.62f, 0.66f, 0.8f, 0.48f)
-        val SWING_X = floatArrayOf(0.2f, 0.18f, 0.26f, 0.24f)
-        val SWING_Y = floatArrayOf(0.05f, 0.07f, 0.04f, 0.06f)
-        val STRENGTH = floatArrayOf(0.95f, 0.9f, 1f, 0.7f)
+        // The vertical swing lets a blob rise towards the middle or sink fully below the edge.
+        val BASE_X = floatArrayOf(0.15f, 0.85f, 0.5f, 0.32f)
+        val BASE_Y = floatArrayOf(1.0f, 0.98f, 1.05f, 0.92f)
+        val BASE_R = floatArrayOf(0.55f, 0.6f, 0.7f, 0.45f)
+        val SWING_X = floatArrayOf(0.32f, 0.3f, 0.36f, 0.34f)
+        val SWING_Y = floatArrayOf(0.3f, 0.26f, 0.32f, 0.24f)
+        val STRENGTH = floatArrayOf(0.8f, 0.75f, 0.85f, 0.65f)
 
-        // Radians per second of drift: whole cycles take roughly 20 to 70 seconds.
-        val FREQ_X = doubleArrayOf(0.23, 0.17, 0.13, 0.29)
-        val FREQ_Y = doubleArrayOf(0.19, 0.25, 0.15, 0.21)
-        val FREQ_R = doubleArrayOf(0.31, 0.27, 0.22, 0.37)
-        val FREQ_C = doubleArrayOf(0.11, 0.14, 0.09, 0.12)
+        // Radians per second of drift: whole cycles take roughly 15 to 50 seconds.
+        val FREQ_X = doubleArrayOf(0.31, 0.24, 0.19, 0.37)
+        val FREQ_Y = doubleArrayOf(0.17, 0.22, 0.13, 0.27)
+        val FREQ_R = doubleArrayOf(0.36, 0.3, 0.26, 0.41)
+        val FREQ_C = doubleArrayOf(0.15, 0.19, 0.12, 0.17)
+        val FREQ_I = doubleArrayOf(0.21, 0.16, 0.26, 0.12)
         val PHASES = doubleArrayOf(0.0, 2.1, 4.2, 1.3)
 
         /** Each blob slides between two palette colours. */
         val COLOR_A = intArrayOf(0, 1, 2, 1)
         val COLOR_B = intArrayOf(1, 2, 0, 0)
-        val SLOT_VALUE = floatArrayOf(0.78f, 0.66f, 0.6f)
+        val SLOT_VALUE = floatArrayOf(0.66f, 0.56f, 0.5f)
         val FILL_SHIFT = floatArrayOf(0f, 30f, -34f)
-        val FALLBACK_PALETTE = floatArrayOf(0.78f, 0.34f, 0.1f, 0.46f, 0.14f, 0.36f, 0.58f, 0.18f, 0.12f)
-        val NEUTRAL_PALETTE = floatArrayOf(0.44f, 0.38f, 0.34f, 0.3f, 0.29f, 0.36f, 0.36f, 0.34f, 0.4f)
+        val FALLBACK_PALETTE = floatArrayOf(0.64f, 0.28f, 0.08f, 0.38f, 0.12f, 0.3f, 0.48f, 0.15f, 0.1f)
+        val NEUTRAL_PALETTE = floatArrayOf(0.38f, 0.33f, 0.3f, 0.26f, 0.25f, 0.31f, 0.31f, 0.29f, 0.34f)
 
         fun maskAt(y: Float): Float {
             val s = ((y - MASK_START) / (MASK_END - MASK_START)).coerceIn(0f, 1f)

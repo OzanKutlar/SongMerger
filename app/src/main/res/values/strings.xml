@@ -1,5 +1,5 @@
 <resources>
-    <string name="app_name">Mediaplayer</string>
+    <string name="app_name">Media Player</string>
 
     <!-- Library -->
     <string name="library_search">Search</string>
@@ -116,10 +116,10 @@
     <string name="import_playlist_title">Import playlist</string>
     <string name="import_target_favorites">Favorites</string>
     <string name="import_permission_title">Notification access needed</string>
-    <string name="import_permission_body">To read the currently playing song and skip through another music app’s playlist, enable Notification Access for Mediaplayer.</string>
+    <string name="import_permission_body">To read the currently playing song and skip through another music app’s playlist, enable Notification Access for Media Player.</string>
     <string name="import_grant_access">Grant access</string>
     <string name="import_waiting_title">Waiting for playback → %1$s</string>
-    <string name="import_waiting_body">Open your other music app and start playing the first song of the playlist (make sure Repeat All is on). Mediaplayer will automatically cycle through the playlist until it loops back to the first song.</string>
+    <string name="import_waiting_body">Open your other music app and start playing the first song of the playlist (make sure Repeat All is on). Media Player will automatically cycle through the playlist until it loops back to the first song.</string>
     <string name="import_cycling_title">Importing (%1$d / %2$d matched)</string>
     <string name="import_cycling_now">Now reading: %1$s — %2$s</string>
     <string name="import_save_now">Save now</string>
