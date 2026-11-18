@@ -1,266 +1,550 @@
 <?xml version="1.0" encoding="utf-8"?>
-<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="@color/background">
+    android:background="@color/background"
+    android:orientation="vertical">
 
+    <!-- Top App Bar -->
     <LinearLayout
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:orientation="vertical"
-        android:paddingBottom="24dp">
+        android:layout_height="64dp"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingStart="6dp"
+        android:paddingEnd="16dp">
 
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="64dp"
-            android:gravity="center_vertical"
-            android:orientation="horizontal">
+        <FrameLayout
+            android:id="@+id/settingsBack"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:background="@drawable/player_cell_bg"
+            android:clickable="true"
+            android:contentDescription="@string/settings_back"
+            android:focusable="true">
 
-            <FrameLayout
-                android:id="@+id/settingsBack"
-                android:layout_width="56dp"
-                android:layout_height="56dp"
-                android:background="@drawable/player_cell_bg"
-                android:clickable="true"
-                android:contentDescription="@string/settings_back"
-                android:focusable="true">
+            <ImageView
+                android:layout_width="24dp"
+                android:layout_height="24dp"
+                android:layout_gravity="center"
+                android:contentDescription="@null"
+                android:src="@drawable/player_ic_back"
+                android:tint="@color/text_primary" />
+        </FrameLayout>
 
-                <ImageView
-                    android:layout_width="24dp"
-                    android:layout_height="24dp"
-                    android:layout_gravity="center"
-                    android:contentDescription="@null"
-                    android:src="@drawable/player_ic_back"
-                    android:tint="#ECEFF1" />
-            </FrameLayout>
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="8dp"
+            android:text="@string/settings_header_title"
+            android:textColor="@color/text_primary"
+            android:textSize="22sp"
+            android:textStyle="bold" />
+    </LinearLayout>
 
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="@string/settings_title"
-                android:textColor="@color/text_primary"
-                android:textSize="20sp"
-                android:textStyle="bold" />
-        </LinearLayout>
+    <ScrollView
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:clipToPadding="false"
+        android:paddingBottom="36dp"
+        android:scrollbars="none">
 
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="vertical"
-            android:paddingLeft="16dp"
-            android:paddingRight="16dp">
+            android:paddingStart="14dp"
+            android:paddingEnd="14dp">
 
+            <!-- ==================== SECTION 1: PLAYBACK ==================== -->
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="8dp"
-                android:text="@string/settings_folders"
-                android:textColor="@color/accent"
-                android:textSize="13sp"
-                android:textStyle="bold" />
-
-            <LinearLayout
-                android:id="@+id/settingsFolders"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="8dp"
-                android:orientation="vertical" />
-
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="8dp"
-                android:gravity="center_vertical"
-                android:orientation="horizontal">
-
-                <Button
-                    android:id="@+id/settingsAddFolder"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="@string/settings_add_folder" />
-
-                <Button
-                    android:id="@+id/settingsRescan"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_marginLeft="12dp"
-                    android:text="@string/settings_rescan" />
-
-                <TextView
-                    android:id="@+id/settingsScan"
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_marginLeft="12dp"
-                    android:layout_weight="1"
-                    android:textColor="@color/text_secondary"
-                    android:textSize="13sp" />
-            </LinearLayout>
-
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="28dp"
-                android:text="@string/settings_separator_title"
-                android:textColor="@color/accent"
-                android:textSize="13sp"
-                android:textStyle="bold" />
-
-            <TextView
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="6dp"
-                android:text="@string/settings_separator_help"
-                android:textColor="@color/text_secondary"
-                android:textSize="14sp" />
-
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="8dp"
-                android:gravity="center_vertical"
-                android:orientation="horizontal">
-
-                <EditText
-                    android:id="@+id/settingsSeparator"
-                    android:layout_width="96dp"
-                    android:layout_height="wrap_content"
-                    android:gravity="center"
-                    android:importantForAutofill="no"
-                    android:inputType="text"
-                    android:maxLength="8"
-                    android:maxLines="1"
-                    android:textColor="@color/text_primary"
-                    android:textSize="20sp" />
-
-                <Button
-                    android:id="@+id/settingsApply"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_marginLeft="12dp"
-                    android:text="@string/settings_apply" />
-            </LinearLayout>
-
-            <TextView
-                android:id="@+id/settingsPreview"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
+                android:layout_marginStart="14dp"
                 android:layout_marginTop="12dp"
-                android:lineSpacingExtra="4dp"
+                android:layout_marginBottom="8dp"
+                android:text="@string/settings_section_playback"
                 android:textColor="@color/text_secondary"
-                android:textSize="14sp" />
-
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="28dp"
-                android:text="@string/settings_crossfade_title"
-                android:textColor="@color/accent"
-                android:textSize="13sp"
+                android:textSize="14sp"
                 android:textStyle="bold" />
-
-            <TextView
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="6dp"
-                android:text="@string/settings_crossfade_help"
-                android:textColor="@color/text_secondary"
-                android:textSize="14sp" />
-
-            <TextView
-                android:id="@+id/settingsCrossfadeValue"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="10dp"
-                android:textColor="@color/text_primary"
-                android:textSize="15sp" />
-
-            <SeekBar
-                android:id="@+id/settingsCrossfade"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="4dp"
-                android:contentDescription="@string/settings_crossfade_title" />
-
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="28dp"
-                android:text="@string/settings_ai_title"
-                android:textColor="@color/accent"
-                android:textSize="13sp"
-                android:textStyle="bold" />
-
-            <TextView
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="6dp"
-                android:text="@string/settings_ai_help"
-                android:textColor="@color/text_secondary"
-                android:textSize="14sp" />
-
-            <EditText
-                android:id="@+id/settingsAiServer"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="8dp"
-                android:hint="@string/mashup_server_hint"
-                android:importantForAutofill="no"
-                android:inputType="textUri"
-                android:maxLength="200"
-                android:maxLines="1"
-                android:textColor="@color/text_primary"
-                android:textColorHint="@color/text_muted"
-                android:textSize="16sp" />
-
-            <EditText
-                android:id="@+id/settingsAiToken"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="4dp"
-                android:hint="@string/settings_ai_token_hint"
-                android:importantForAutofill="no"
-                android:inputType="textPassword"
-                android:maxLength="128"
-                android:maxLines="1"
-                android:textColor="@color/text_primary"
-                android:textColorHint="@color/text_muted"
-                android:textSize="16sp" />
 
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="8dp"
-                android:gravity="center_vertical"
-                android:orientation="horizontal">
+                android:background="@drawable/settings_card_bg"
+                android:orientation="vertical">
 
-                <Button
-                    android:id="@+id/settingsAiSave"
-                    android:layout_width="wrap_content"
+                <!-- Sleep timer -->
+                <LinearLayout
+                    android:id="@+id/settingsRowSleepTimer"
+                    android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:text="@string/settings_ai_save" />
+                    android:background="@drawable/settings_item_bg"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:orientation="vertical"
+                    android:paddingStart="20dp"
+                    android:paddingTop="16dp"
+                    android:paddingEnd="20dp"
+                    android:paddingBottom="16dp">
 
-                <Button
-                    android:id="@+id/settingsAiTest"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_marginLeft="12dp"
-                    android:text="@string/settings_ai_test" />
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="@string/menu_sleep_timer"
+                        android:textColor="@color/text_primary"
+                        android:textSize="18sp" />
 
-                <Button
-                    android:id="@+id/settingsAiDiscover"
-                    android:layout_width="wrap_content"
+                    <TextView
+                        android:id="@+id/settingsSleepTimerSummary"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="2dp"
+                        android:text="@string/settings_crossfade_off"
+                        android:textColor="@color/accent"
+                        android:textSize="14sp" />
+                </LinearLayout>
+
+                <View
+                    android:layout_width="match_parent"
+                    android:layout_height="1dp"
+                    android:layout_marginStart="20dp"
+                    android:layout_marginEnd="20dp"
+                    android:background="@color/divider" />
+
+                <!-- Play speed -->
+                <LinearLayout
+                    android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_marginLeft="12dp"
-                    android:text="@string/settings_ai_discover" />
+                    android:orientation="vertical"
+                    android:paddingStart="20dp"
+                    android:paddingTop="16dp"
+                    android:paddingEnd="20dp"
+                    android:paddingBottom="18dp">
+
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="@string/settings_play_speed_title"
+                        android:textColor="@color/text_primary"
+                        android:textSize="18sp" />
+
+                    <TextView
+                        android:id="@+id/settingsPlaySpeedValue"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="8dp"
+                        android:gravity="center_horizontal"
+                        android:text="1.0x"
+                        android:textColor="@color/accent"
+                        android:textSize="14sp" />
+
+                    <SeekBar
+                        android:id="@+id/settingsPlaySpeed"
+                        android:layout_width="match_parent"
+                        android:layout_height="34dp"
+                        android:layout_marginTop="4dp"
+                        android:contentDescription="@string/settings_play_speed_title"
+                        android:maxHeight="12dp"
+                        android:minHeight="12dp"
+                        android:paddingStart="10dp"
+                        android:paddingEnd="10dp"
+                        android:progressDrawable="@drawable/settings_seek_progress"
+                        android:splitTrack="false"
+                        android:thumb="@drawable/settings_seek_thumb" />
+                </LinearLayout>
+
+                <View
+                    android:layout_width="match_parent"
+                    android:layout_height="1dp"
+                    android:layout_marginStart="20dp"
+                    android:layout_marginEnd="20dp"
+                    android:background="@color/divider" />
+
+                <!-- Crossfade between tracks -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:paddingStart="20dp"
+                    android:paddingTop="16dp"
+                    android:paddingEnd="20dp"
+                    android:paddingBottom="18dp">
+
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="@string/settings_crossfade_row_title"
+                        android:textColor="@color/text_primary"
+                        android:textSize="18sp" />
+
+                    <TextView
+                        android:id="@+id/settingsCrossfadeValue"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="8dp"
+                        android:gravity="center_horizontal"
+                        android:textColor="@color/accent"
+                        android:textSize="14sp" />
+
+                    <SeekBar
+                        android:id="@+id/settingsCrossfade"
+                        android:layout_width="match_parent"
+                        android:layout_height="34dp"
+                        android:layout_marginTop="4dp"
+                        android:contentDescription="@string/settings_crossfade_row_title"
+                        android:maxHeight="12dp"
+                        android:minHeight="12dp"
+                        android:paddingStart="10dp"
+                        android:paddingEnd="10dp"
+                        android:progressDrawable="@drawable/settings_seek_progress"
+                        android:splitTrack="false"
+                        android:thumb="@drawable/settings_seek_thumb" />
+                </LinearLayout>
+
+                <View
+                    android:layout_width="match_parent"
+                    android:layout_height="1dp"
+                    android:layout_marginStart="20dp"
+                    android:layout_marginEnd="20dp"
+                    android:background="@color/divider" />
+
+                <!-- Skip silence between tracks -->
+                <LinearLayout
+                    android:id="@+id/settingsRowSkipSilence"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:background="@drawable/settings_item_bg"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal"
+                    android:paddingStart="20dp"
+                    android:paddingTop="16dp"
+                    android:paddingEnd="16dp"
+                    android:paddingBottom="16dp">
+
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="@string/settings_skip_silence_title"
+                        android:textColor="@color/text_primary"
+                        android:textSize="18sp" />
+
+                    <androidx.appcompat.widget.SwitchCompat
+                        android:id="@+id/settingsSwitchSkipSilence"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        app:thumbTint="@color/text_primary"
+                        app:trackTint="@color/accent" />
+                </LinearLayout>
             </LinearLayout>
 
+            <!-- ==================== SECTION 2: PLAYLISTS & LIBRARY ==================== -->
             <TextView
-                android:id="@+id/settingsAiStatus"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="14dp"
+                android:layout_marginTop="24dp"
+                android:layout_marginBottom="8dp"
+                android:text="@string/settings_section_playlists"
+                android:textColor="@color/text_secondary"
+                android:textSize="14sp"
+                android:textStyle="bold" />
+
+            <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="8dp"
+                android:background="@drawable/settings_card_bg"
+                android:orientation="vertical">
+
+                <!-- Music folders -->
+                <LinearLayout
+                    android:id="@+id/settingsRowFolders"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:background="@drawable/settings_item_bg"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:orientation="vertical"
+                    android:paddingStart="20dp"
+                    android:paddingTop="16dp"
+                    android:paddingEnd="20dp"
+                    android:paddingBottom="16dp">
+
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="@string/settings_folders_row_title"
+                        android:textColor="@color/text_primary"
+                        android:textSize="18sp" />
+
+                    <TextView
+                        android:id="@+id/settingsFoldersSummary"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="2dp"
+                        android:textColor="@color/accent"
+                        android:textSize="14sp" />
+                </LinearLayout>
+
+                <View
+                    android:layout_width="match_parent"
+                    android:layout_height="1dp"
+                    android:layout_marginStart="20dp"
+                    android:layout_marginEnd="20dp"
+                    android:background="@color/divider" />
+
+                <!-- Rescan library -->
+                <LinearLayout
+                    android:id="@+id/settingsRescan"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:background="@drawable/settings_item_bg"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:orientation="vertical"
+                    android:paddingStart="20dp"
+                    android:paddingTop="16dp"
+                    android:paddingEnd="20dp"
+                    android:paddingBottom="16dp">
+
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="@string/library_rescan"
+                        android:textColor="@color/text_primary"
+                        android:textSize="18sp" />
+
+                    <TextView
+                        android:id="@+id/settingsScan"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="2dp"
+                        android:textColor="@color/accent"
+                        android:textSize="14sp" />
+                </LinearLayout>
+
+                <View
+                    android:layout_width="match_parent"
+                    android:layout_height="1dp"
+                    android:layout_marginStart="20dp"
+                    android:layout_marginEnd="20dp"
+                    android:background="@color/divider" />
+
+                <!-- Artist separator -->
+                <LinearLayout
+                    android:id="@+id/settingsRowSeparator"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:background="@drawable/settings_item_bg"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:orientation="vertical"
+                    android:paddingStart="20dp"
+                    android:paddingTop="16dp"
+                    android:paddingEnd="20dp"
+                    android:paddingBottom="16dp">
+
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="@string/settings_separator_row_title"
+                        android:textColor="@color/text_primary"
+                        android:textSize="18sp" />
+
+                    <TextView
+                        android:id="@+id/settingsPreview"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="2dp"
+                        android:ellipsize="end"
+                        android:maxLines="2"
+                        android:textColor="@color/accent"
+                        android:textSize="14sp" />
+                </LinearLayout>
+
+                <View
+                    android:layout_width="match_parent"
+                    android:layout_height="1dp"
+                    android:layout_marginStart="20dp"
+                    android:layout_marginEnd="20dp"
+                    android:background="@color/divider" />
+
+                <!-- Don't allow duplicate songs -->
+                <LinearLayout
+                    android:id="@+id/settingsRowNoDuplicates"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:background="@drawable/settings_item_bg"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal"
+                    android:paddingStart="20dp"
+                    android:paddingTop="16dp"
+                    android:paddingEnd="16dp"
+                    android:paddingBottom="16dp">
+
+                    <LinearLayout
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:orientation="vertical">
+
+                        <TextView
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:text="@string/settings_no_duplicates_title"
+                            android:textColor="@color/text_primary"
+                            android:textSize="18sp" />
+
+                        <TextView
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="2dp"
+                            android:text="@string/settings_no_duplicates_sub"
+                            android:textColor="@color/text_secondary"
+                            android:textSize="14sp" />
+                    </LinearLayout>
+
+                    <androidx.appcompat.widget.SwitchCompat
+                        android:id="@+id/settingsSwitchNoDuplicates"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        app:thumbTint="@color/text_primary"
+                        app:trackTint="@color/accent" />
+                </LinearLayout>
+            </LinearLayout>
+
+            <!-- ==================== SECTION 3: AI MASHUP SERVER ==================== -->
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="14dp"
+                android:layout_marginTop="24dp"
+                android:layout_marginBottom="8dp"
+                android:text="@string/settings_section_ai"
                 android:textColor="@color/text_secondary"
-                android:textSize="14sp" />
+                android:textSize="14sp"
+                android:textStyle="bold" />
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:background="@drawable/settings_card_bg"
+                android:orientation="vertical">
+
+                <!-- Server address & token -->
+                <LinearLayout
+                    android:id="@+id/settingsRowAiServer"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:background="@drawable/settings_item_bg"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:orientation="vertical"
+                    android:paddingStart="20dp"
+                    android:paddingTop="16dp"
+                    android:paddingEnd="20dp"
+                    android:paddingBottom="16dp">
+
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="@string/mashup_server_title"
+                        android:textColor="@color/text_primary"
+                        android:textSize="18sp" />
+
+                    <TextView
+                        android:id="@+id/settingsAiServerSummary"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="2dp"
+                        android:textColor="@color/accent"
+                        android:textSize="14sp" />
+                </LinearLayout>
+
+                <View
+                    android:layout_width="match_parent"
+                    android:layout_height="1dp"
+                    android:layout_marginStart="20dp"
+                    android:layout_marginEnd="20dp"
+                    android:background="@color/divider" />
+
+                <!-- Find server on Wi-Fi (LAN) -->
+                <LinearLayout
+                    android:id="@+id/settingsAiDiscover"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:background="@drawable/settings_item_bg"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:orientation="vertical"
+                    android:paddingStart="20dp"
+                    android:paddingTop="16dp"
+                    android:paddingEnd="20dp"
+                    android:paddingBottom="16dp">
+
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="@string/settings_ai_discover_row"
+                        android:textColor="@color/text_primary"
+                        android:textSize="18sp" />
+
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="2dp"
+                        android:text="@string/settings_ai_discover_sub"
+                        android:textColor="@color/text_secondary"
+                        android:textSize="14sp" />
+                </LinearLayout>
+
+                <View
+                    android:layout_width="match_parent"
+                    android:layout_height="1dp"
+                    android:layout_marginStart="20dp"
+                    android:layout_marginEnd="20dp"
+                    android:background="@color/divider" />
+
+                <!-- Test connection -->
+                <LinearLayout
+                    android:id="@+id/settingsAiTest"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:background="@drawable/settings_item_bg"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:orientation="vertical"
+                    android:paddingStart="20dp"
+                    android:paddingTop="16dp"
+                    android:paddingEnd="20dp"
+                    android:paddingBottom="16dp">
+
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="@string/settings_ai_test_row"
+                        android:textColor="@color/text_primary"
+                        android:textSize="18sp" />
+
+                    <TextView
+                        android:id="@+id/settingsAiStatus"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="2dp"
+                        android:text="@string/settings_ai_test_sub"
+                        android:textColor="@color/accent"
+                        android:textSize="14sp" />
+                </LinearLayout>
+            </LinearLayout>
+
         </LinearLayout>
-    </LinearLayout>
-</ScrollView>
+    </ScrollView>
+
+</LinearLayout>

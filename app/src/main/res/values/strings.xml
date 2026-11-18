@@ -255,7 +255,28 @@
 
     <!-- Settings -->
     <string name="settings_title">Settings</string>
+    <string name="settings_header_title">Media Player settings</string>
     <string name="settings_back">Back</string>
+    <string name="settings_section_playback">Playback</string>
+    <string name="settings_section_playlists">Playlists &amp; Library</string>
+    <string name="settings_section_ai">AI Mashup Server</string>
+    <string name="settings_play_speed_title">Play speed</string>
+    <string name="settings_crossfade_row_title">Crossfade between tracks</string>
+    <plurals name="settings_crossfade_seconds_plural">
+        <item quantity="one">%1$d second</item>
+        <item quantity="other">%1$d seconds</item>
+    </plurals>
+    <string name="settings_skip_silence_title">Skip silence between tracks</string>
+    <string name="settings_folders_row_title">Music folders</string>
+    <string name="settings_separator_row_title">Artist separator</string>
+    <string name="settings_no_duplicates_title">Don’t allow duplicate songs</string>
+    <string name="settings_no_duplicates_sub">Don’t allow duplicates in queue</string>
+    <string name="settings_ai_not_configured">Not configured</string>
+    <string name="settings_ai_token_active">Token set</string>
+    <string name="settings_ai_discover_row">Find server on Wi-Fi</string>
+    <string name="settings_ai_discover_sub">Automatically detect ai_router/server.py on your local network</string>
+    <string name="settings_ai_test_row">Test server connection</string>
+    <string name="settings_ai_test_sub">Tap to check server status and GPU device</string>
     <string name="settings_folders">MUSIC FOLDERS</string>
     <string name="settings_no_folders">No folders added yet</string>
     <string name="settings_add_folder">Add folder</string>

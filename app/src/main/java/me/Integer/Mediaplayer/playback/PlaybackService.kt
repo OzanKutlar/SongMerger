@@ -17,7 +17,8 @@ import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import android.os.SystemClock
-import androidx.media3.common.Player
+import androidx.media3.common.PlaybackParameters
+import androidx.media3.common.Playerimport androidx.media3.common.Player
 import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.audio.AudioSink
@@ -33,6 +34,7 @@ import androidx.media3.session.SessionResult
 import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
 import me.Integer.Mediaplayer.MainActivity
+import me.Integer.Mediaplayer.library.PlayerSettings
 import kotlin.random.Random
 
 /**
@@ -51,6 +53,8 @@ class PlaybackService : MediaSessionService() {
 
     private var session: MediaSession? = null
     private var player: ExoPlayer? = null
+    private var deckARef: ExoPlayer? = null
+    private var deckBRef: ExoPlayer? = null
     private var artLoader: EmbeddedArtBitmapLoader? = null
     private var audioManager: AudioManager? = null
     private var focusRequest: AudioFocusRequest? = null
@@ -152,6 +156,7 @@ class PlaybackService : MediaSessionService() {
                 .add(QueueCommands.GET_STATE)
                 .add(QueueCommands.RESTORE_LAST)
                 .add(QueueCommands.SET_SLEEP_TIMER)
+                .add(QueueCommands.SET_AUDIO_PREFS)
                 .build()
             return MediaSession.ConnectionResult.AcceptedResultBuilder(session)
                 .setAvailableSessionCommands(commands)
@@ -218,10 +223,13 @@ class PlaybackService : MediaSessionService() {
         val loader = EmbeddedArtBitmapLoader(this)
         artLoader = loader
         audioManager = getSystemService(Context.AUDIO_SERVICE) as? AudioManager
+        val settings = PlayerSettings(this)
         val eqA = BassSwapProcessor()
         val eqB = BassSwapProcessor()
-        val deckA = buildPlayer(eqA)
-        val deckB = buildPlayer(eqB)
+        val deckA = buildPlayer(eqA, settings.skipSilence, settings.playbackSpeed)
+        val deckB = buildPlayer(eqB, settings.skipSilence, settings.playbackSpeed)
+        deckARef = deckA
+        deckBRef = deckB
         deckA.addListener(focusTriggerListener)
         deckB.addListener(focusTriggerListener)
         deckA.addListener(memoryListener)
@@ -268,6 +276,8 @@ class PlaybackService : MediaSessionService() {
         session?.release()
         session = null
         player = null
+        deckARef = null
+        deckBRef = null
         artLoader?.shutdown()
         artLoader = null
         super.onDestroy()
@@ -293,6 +303,15 @@ class PlaybackService : MediaSessionService() {
                 val minutes = args.getInt(QueueCommands.ARG_MINUTES, 0)
                 val endOfTrack = args.getBoolean(QueueCommands.ARG_END_OF_TRACK, false)
                 configureSleepTimer(minutes, endOfTrack)
+                true
+            }
+            QueueCommands.ACTION_SET_AUDIO_PREFS -> {
+                val skipSilence = args.getBoolean(QueueCommands.ARG_SKIP_SILENCE, false)
+                val speed = args.getFloat(QueueCommands.ARG_PLAY_SPEED, 1.0f)
+                    .coerceIn(PlayerSettings.MIN_PLAY_SPEED, PlayerSettings.MAX_PLAY_SPEED)
+                deckARef?.skipSilenceEnabled = skipSilence
+                deckBRef?.skipSilenceEnabled = skipSilence
+                player?.playbackParameters = PlaybackParameters(speed, 1f)
                 true
             }
             QueueCommands.ACTION_GET_STATE -> true
@@ -560,7 +579,7 @@ class PlaybackService : MediaSessionService() {
 
     // ------------------------------------------------------------------ setup
 
-    private fun buildPlayer(bassSwap: BassSwapProcessor): ExoPlayer {
+    private fun buildPlayer(bassSwap: BassSwapProcessor, skipSilence: Boolean, speed: Float): ExoPlayer {
         val attributes = AudioAttributes.Builder()
             .setUsage(C.USAGE_MEDIA)
             .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
@@ -587,6 +606,10 @@ class PlaybackService : MediaSessionService() {
             .setHandleAudioBecomingNoisy(true)
             .setWakeMode(C.WAKE_MODE_LOCAL)
             .build()
+            .apply {
+                skipSilenceEnabled = skipSilence
+                if (speed != 1.0f) playbackParameters = PlaybackParameters(speed, 1f)
+            }
     }
 
     private fun requestAudioFocus() {

@@ -20,6 +20,7 @@ import androidx.media3.session.SessionResult
 import androidx.media3.session.SessionToken
 import com.google.common.util.concurrent.ListenableFuture
 import me.Integer.Mediaplayer.library.MixSegment
+import me.Integer.Mediaplayer.library.PlayerSettings
 import me.Integer.Mediaplayer.library.Track
 import java.util.concurrent.CancellationException
 import java.util.concurrent.ExecutionException
@@ -359,6 +360,7 @@ class PlayerConnection(
     /** Inserts a song right after the current one; starts playback when the queue was empty. */
     fun playNext(track: Track, artist: String) {
         val player = controller ?: return
+        if (PlayerSettings(appContext).preventDuplicatesInQueue && isTrackInQueue(player, track.uri)) return
         val item = toItem(track, artist)
         val wasEmpty = player.mediaItemCount == 0
         val insertAt = if (wasEmpty) 0 else (player.currentMediaItemIndex + 1).coerceAtMost(player.mediaItemCount)
@@ -368,10 +370,20 @@ class PlayerConnection(
 
     fun addToQueue(track: Track, artist: String) {
         val player = controller ?: return
+        if (PlayerSettings(appContext).preventDuplicatesInQueue && isTrackInQueue(player, track.uri)) return
         val item = toItem(track, artist)
         val wasEmpty = player.mediaItemCount == 0
         player.addMediaItem(item)
         if (wasEmpty) startFresh(player) else publish()
+    }
+
+    private fun isTrackInQueue(player: MediaController, trackUri: String): Boolean {
+        if (trackUri.isEmpty()) return false
+        val count = minOf(player.mediaItemCount, MAX_QUEUE)
+        for (i in 0 until count) {
+            if (player.getMediaItemAt(i).mediaId == trackUri) return true
+        }
+        return false
     }
 
     fun moveQueueItem(fromIndex: Int, toIndex: Int) {
@@ -540,6 +552,16 @@ class PlayerConnection(
         if (sleepEndOfTrack) return -1L
         val rem = sleepDeadlineElapsedMs - SystemClock.elapsedRealtime()
         return if (rem > 0L) rem else 0L
+    }
+
+    /** Updates skip-silence and playback speed on the live playback service. */
+    fun applyAudioPreferences(skipSilence: Boolean, playbackSpeed: Float) {
+        val player = controller ?: return
+        val args = Bundle().apply {
+            putBoolean(QueueCommands.ARG_SKIP_SILENCE, skipSilence)
+            putFloat(QueueCommands.ARG_PLAY_SPEED, playbackSpeed)
+        }
+        send(player, QueueCommands.SET_AUDIO_PREFS, args)
     }
 
     // ------------------------------------------------------------------ snapshot
