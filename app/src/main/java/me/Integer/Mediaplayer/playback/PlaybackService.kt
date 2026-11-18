@@ -16,8 +16,12 @@ import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
+import android.os.SystemClock
 import androidx.media3.common.Player
+import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.audio.AudioSink
+import androidx.media3.exoplayer.audio.DefaultAudioSink
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.extractor.DefaultExtractorsFactory
 import androidx.media3.extractor.mp3.Mp3Extractor
@@ -60,12 +64,23 @@ class PlaybackService : MediaSessionService() {
     /** Blends mashup steps into each other across two ping-pong decks; idle for normal songs. */
     private var crossfader: DjCrossfader? = null
 
+    // Sleep Timer state
+    private var sleepDeadlineMs = 0L
+    private var sleepEndOfTrack = false
+    private var sleepFadingSinceMs = 0L
+
     private val saveQueueTask = Runnable { saveQueueNow() }
 
     private val savePositionTask = object : Runnable {
         override fun run() {
             savePositionNow()
             if (player?.isPlaying == true) main.postDelayed(this, POSITION_SAVE_INTERVAL_MS)
+        }
+    }
+
+    private val sleepTickTask = object : Runnable {
+        override fun run() {
+            onSleepTick()
         }
     }
 
@@ -102,6 +117,9 @@ class PlaybackService : MediaSessionService() {
     private val memoryListener = object : Player.Listener {
         override fun onEvents(eventPlayer: Player, events: Player.Events) {
             if (eventPlayer !== player) return
+            if (sleepEndOfTrack && events.contains(Player.EVENT_MEDIA_ITEM_TRANSITION)) {
+                finishSleepTimer()
+            }
             if (events.contains(Player.EVENT_TIMELINE_CHANGED)) scheduleQueueSave()
             if (events.containsAny(
                     Player.EVENT_MEDIA_ITEM_TRANSITION,
@@ -133,6 +151,7 @@ class PlaybackService : MediaSessionService() {
                 .add(QueueCommands.ADOPT_ORDER)
                 .add(QueueCommands.GET_STATE)
                 .add(QueueCommands.RESTORE_LAST)
+                .add(QueueCommands.SET_SLEEP_TIMER)
                 .build()
             return MediaSession.ConnectionResult.AcceptedResultBuilder(session)
                 .setAvailableSessionCommands(commands)
@@ -199,14 +218,19 @@ class PlaybackService : MediaSessionService() {
         val loader = EmbeddedArtBitmapLoader(this)
         artLoader = loader
         audioManager = getSystemService(Context.AUDIO_SERVICE) as? AudioManager
-        val deckA = buildPlayer()
-        val deckB = buildPlayer()
+        val eqA = BassSwapProcessor()
+        val eqB = BassSwapProcessor()
+        val deckA = buildPlayer(eqA)
+        val deckB = buildPlayer(eqB)
         deckA.addListener(focusTriggerListener)
         deckB.addListener(focusTriggerListener)
         deckA.addListener(memoryListener)
         deckB.addListener(memoryListener)
         player = deckA
-        crossfader = DjCrossfader(deckA, deckB) { newActive ->
+        crossfader = DjCrossfader(deckA, deckB, eqA, eqB) { newActive ->
+            if (sleepEndOfTrack) {
+                finishSleepTimer()
+            }
             player = newActive
             session?.player = newActive
             savePositionNow()
@@ -233,6 +257,7 @@ class PlaybackService : MediaSessionService() {
 
     override fun onDestroy() {
         main.removeCallbacks(savePositionTask)
+        main.removeCallbacks(sleepTickTask)
         saveQueueNow()
         savePositionNow()
         memory?.shutdown()
@@ -264,13 +289,72 @@ class PlaybackService : MediaSessionService() {
                 scheduleQueueSave()
                 true
             }
+            QueueCommands.ACTION_SET_SLEEP_TIMER -> {
+                val minutes = args.getInt(QueueCommands.ARG_MINUTES, 0)
+                val endOfTrack = args.getBoolean(QueueCommands.ARG_END_OF_TRACK, false)
+                configureSleepTimer(minutes, endOfTrack)
+                true
+            }
             QueueCommands.ACTION_GET_STATE -> true
             else -> false
         }
     }
 
     private fun stateExtras(): Bundle {
-        return Bundle().apply { putBoolean(QueueCommands.ARG_ENABLED, shuffleOn) }
+        val now = SystemClock.elapsedRealtime()
+        val remaining = when {
+            sleepEndOfTrack -> -1L
+            sleepDeadlineMs > now -> sleepDeadlineMs - now
+            else -> 0L
+        }
+        return Bundle().apply {
+            putBoolean(QueueCommands.ARG_ENABLED, shuffleOn)
+            putLong(QueueCommands.ARG_SLEEP_REMAINING_MS, remaining)
+        }
+    }
+
+    private fun configureSleepTimer(minutes: Int, endOfTrack: Boolean) {
+        main.removeCallbacks(sleepTickTask)
+        sleepFadingSinceMs = 0L
+        crossfader?.setSleepGain(1f)
+        if (endOfTrack) {
+            sleepEndOfTrack = true
+            sleepDeadlineMs = 0L
+            return
+        }
+        sleepEndOfTrack = false
+        if (minutes <= 0) {
+            sleepDeadlineMs = 0L
+            return
+        }
+        sleepDeadlineMs = SystemClock.elapsedRealtime() + minutes * 60_000L
+        main.postDelayed(sleepTickTask, SLEEP_TICK_MS)
+    }
+
+    private fun onSleepTick() {
+        val now = SystemClock.elapsedRealtime()
+        val remaining = sleepDeadlineMs - now
+        if (remaining <= 0L) {
+            finishSleepTimer()
+            return
+        }
+        if (remaining <= SLEEP_FADE_MS) {
+            val gain = (remaining.toFloat() / SLEEP_FADE_MS.toFloat()).coerceIn(0f, 1f)
+            crossfader?.setSleepGain(gain)
+            main.postDelayed(sleepTickTask, 100L)
+        } else {
+            main.postDelayed(sleepTickTask, minOf(SLEEP_TICK_MS, remaining - SLEEP_FADE_MS))
+        }
+    }
+
+    private fun finishSleepTimer() {
+        main.removeCallbacks(sleepTickTask)
+        sleepDeadlineMs = 0L
+        sleepEndOfTrack = false
+        sleepFadingSinceMs = 0L
+        crossfader?.abort()
+        player?.pause()
+        crossfader?.setSleepGain(1f)
     }
 
     /** Scrambles the queue around the playing song, or puts it back, without a gap in playback. */
@@ -476,7 +560,7 @@ class PlaybackService : MediaSessionService() {
 
     // ------------------------------------------------------------------ setup
 
-    private fun buildPlayer(): ExoPlayer {
+    private fun buildPlayer(bassSwap: BassSwapProcessor): ExoPlayer {
         val attributes = AudioAttributes.Builder()
             .setUsage(C.USAGE_MEDIA)
             .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
@@ -484,7 +568,20 @@ class PlaybackService : MediaSessionService() {
         val extractors = DefaultExtractorsFactory()
             .setConstantBitrateSeekingEnabled(true)
             .setMp3ExtractorFlags(Mp3Extractor.FLAG_ENABLE_INDEX_SEEKING)
-        return ExoPlayer.Builder(this)
+        val renderers = object : DefaultRenderersFactory(this) {
+            override fun buildAudioSink(
+                context: Context,
+                enableFloatOutput: Boolean,
+                enableAudioTrackPlaybackParams: Boolean
+            ): AudioSink {
+                return DefaultAudioSink.Builder(context)
+                    .setEnableFloatOutput(enableFloatOutput)
+                    .setEnableAudioTrackPlaybackParams(enableAudioTrackPlaybackParams)
+                    .setAudioProcessors(arrayOf(bassSwap))
+                    .build()
+            }
+        }
+        return ExoPlayer.Builder(this, renderers)
             .setMediaSourceFactory(DefaultMediaSourceFactory(this, extractors))
             .setAudioAttributes(attributes, false)
             .setHandleAudioBecomingNoisy(true)
@@ -530,6 +627,8 @@ class PlaybackService : MediaSessionService() {
         const val NOTHING_SAVED = "no saved queue to resume"
         const val QUEUE_SAVE_DELAY_MS = 1000L
         const val POSITION_SAVE_INTERVAL_MS = 5000L
+        const val SLEEP_TICK_MS = 1000L
+        const val SLEEP_FADE_MS = 5000L
         const val OPEN_PLAYER_REQUEST = 1
     }
 }

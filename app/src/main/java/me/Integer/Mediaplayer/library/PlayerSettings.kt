@@ -35,6 +35,16 @@ class PlayerSettings(context: Context) {
             if (value in ArtistSorter.MODES) prefs.edit().putInt(KEY_ARTIST_SORT, value).apply()
         }
 
+    /** One of [AlbumSorter.MODES]; anything else reads as sorting by album name. */
+    var albumSort: Int
+        get() {
+            val stored = prefs.getInt(KEY_ALBUM_SORT, AlbumSorter.BY_NAME)
+            return if (stored in AlbumSorter.MODES) stored else AlbumSorter.BY_NAME
+        }
+        set(value) {
+            if (value in AlbumSorter.MODES) prefs.edit().putInt(KEY_ALBUM_SORT, value).apply()
+        }
+
     /** The address of the mashup server, such as http://192.168.1.50:8765; empty when not set. */
     var aiServerUrl: String
         get() = sanitiseServerUrl(prefs.getString(KEY_AI_SERVER, ""))
@@ -70,6 +80,7 @@ class PlayerSettings(context: Context) {
         private const val KEY_SEPARATOR = "artist_separator"
         private const val KEY_SORT = "track_sort"
         private const val KEY_ARTIST_SORT = "artist_sort"
+        private const val KEY_ALBUM_SORT = "album_sort"
         private const val KEY_AI_SERVER = "ai_server_url"
         private const val KEY_AI_TOKEN = "ai_server_token"
         private const val KEY_CROSSFADE = "crossfade_seconds"

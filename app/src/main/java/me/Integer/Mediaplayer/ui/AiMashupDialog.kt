@@ -12,6 +12,7 @@ import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.ProgressBar
 import android.widget.ScrollView
+import android.widget.SeekBar
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
@@ -62,13 +63,13 @@ object AiMashupDialog {
         withServer(context, repository) { chooseSource(context, repository, host) }
     }
 
-    /** Starts at once with [tracks], for example the songs of one playlist. */
+    /** Prompts options and starts with [tracks], for example the songs of one playlist. */
     fun startFrom(context: Context, repository: LibraryRepository, host: PlayerHost, tracks: List<Track>) {
         if (AiMashupGenerator.get(context).state.isRunning) {
             showStatusDialog(context, host)
             return
         }
-        withServer(context, repository) { begin(context, host, tracks) }
+        withServer(context, repository) { promptOptions(context, host, tracks) }
     }
 
     /** Re-opens the status dialog when a job is running or has results waiting. */
@@ -129,15 +130,112 @@ object AiMashupDialog {
                     1 -> repository.favoriteTracks()
                     else -> playlists.getOrNull(which - 2)?.let { repository.resolveTracks(it.trackUris) }
                 } ?: return@setItems
-                begin(context, host, source)
+                promptOptions(context, host, source)
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
+    }
+
+    /** Lets the user pick how many mashups, songs per mashup, and an optional opening seed track. */
+    private fun promptOptions(context: Context, host: PlayerHost, source: List<Track>) {
+        if (source.size < 2) {
+            begin(context, host, source, AiMashupGenerator.Options())
+            return
+        }
+        val pad = dp(context, PADDING_DP)
+        var count = AiMashupGenerator.DEFAULT_PLAYLIST_COUNT
+        var length = minOf(AiMashupGenerator.DEFAULT_TRACKS_PER_PLAYLIST, source.size.coerceAtLeast(2))
+        var seedTrack: Track? = null
+
+        val root = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(pad, pad / 2, pad, pad / 4)
+        }
+        val countLabel = TextView(context).apply {
+            setTextColor(ContextCompat.getColor(context, R.color.text_primary))
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
+        }
+        val countSeek = SeekBar(context).apply {
+            max = 9 // 1..10
+            progress = count - 1
+        }
+        val lengthLabel = TextView(context).apply {
+            setTextColor(ContextCompat.getColor(context, R.color.text_primary))
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
+            setPadding(0, dp(context, DETAIL_BOTTOM_DP), 0, 0)
+        }
+        val maxLen = minOf(20, source.size).coerceAtLeast(2)
+        val lengthSeek = SeekBar(context).apply {
+            max = (maxLen - 2).coerceAtLeast(1)
+            progress = (length - 2).coerceIn(0, max)
+        }
+        val seedButton = TextView(context).apply {
+            setTextColor(ContextCompat.getColor(context, R.color.accent))
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
+            setPadding(0, dp(context, DETAIL_BOTTOM_DP), 0, dp(context, DETAIL_TOP_DP))
+            isClickable = true
+            isFocusable = true
+        }
+
+        fun refreshLabels() {
+            countLabel.text = context.getString(R.string.mashup_opt_count, count)
+            lengthLabel.text = context.getString(R.string.mashup_opt_tracks, length)
+            val seedName = seedTrack?.title ?: context.getString(R.string.mashup_opt_seed_any)
+            seedButton.text = context.getString(R.string.mashup_opt_seed, seedName)
+        }
+
+        countSeek.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(bar: SeekBar?, progress: Int, fromUser: Boolean) {
+                count = progress + 1
+                refreshLabels()
+            }
+            override fun onStartTrackingTouch(bar: SeekBar?) = Unit
+            override fun onStopTrackingTouch(bar: SeekBar?) = Unit
+        })
+        lengthSeek.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(bar: SeekBar?, progress: Int, fromUser: Boolean) {
+                length = (progress + 2).coerceAtMost(maxLen)
+                refreshLabels()
+            }
+            override fun onStartTrackingTouch(bar: SeekBar?) = Unit
+            override fun onStopTrackingTouch(bar: SeekBar?) = Unit
+        })
+        seedButton.setOnClickListener {
+            val candidates = source.take(200)
+            val names = arrayOf(context.getString(R.string.mashup_opt_seed_any)) + candidates.map { it.title }
+            AlertDialog.Builder(context)
+                .setTitle(R.string.mashup_opt_seed_choose)
+                .setItems(names) { _, which ->
+                    seedTrack = if (which == 0) null else candidates.getOrNull(which - 1)
+                    refreshLabels()
+                }
+                .show()
+        }
+        refreshLabels()
+        root.addView(countLabel)
+        root.addView(countSeek)
+        root.addView(lengthLabel)
+        root.addView(lengthSeek)
+        root.addView(seedButton)
+
+        AlertDialog.Builder(context)
+            .setTitle(R.string.mashup_title)
+            .setView(root)
+            .setPositiveButton(R.string.mashup_start) { _, _ ->
+                begin(
+                    context,
+                    host,
+                    source,
+                    AiMashupGenerator.Options(count, length, seedTrack?.uri.orEmpty())
+                )
             }
             .setNegativeButton(android.R.string.cancel, null)
             .show()
     }
 
     /** A start that cannot begin still shows its reason in the status dialog. */
-    private fun begin(context: Context, host: PlayerHost, source: List<Track>) {
-        AiMashupGenerator.get(context).start(source)
+    private fun begin(context: Context, host: PlayerHost, source: List<Track>, options: AiMashupGenerator.Options) {
+        AiMashupGenerator.get(context).start(source, options)
         showStatusDialog(context, host)
     }
 

@@ -169,6 +169,19 @@ class PlaylistStore(context: Context, private val onChanged: () -> Unit) {
         }
     }
 
+    /** Replaces the mix segments of playlist [id]; fewer than two steps turns it into a plain playlist. */
+    fun updateSegments(id: Long, nextSegments: List<MixSegment>): Boolean {
+        val steps = nextSegments.filter { it.trackUri.isNotEmpty() }.take(MAX_SEGMENTS)
+        return update(id) { old ->
+            if (steps.size < MIN_MIX_STEPS) {
+                old.copy(segments = emptyList())
+            } else {
+                val uris = steps.map { it.trackUri }.distinct().take(MAX_TRACKS)
+                old.copy(trackUris = uris, segments = steps)
+            }
+        }
+    }
+
     // ------------------------------------------------------------------ changes
 
     /** Replaces one playlist; [change] returns null to leave it as it is. */

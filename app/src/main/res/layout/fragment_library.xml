@@ -183,6 +183,19 @@
             android:text="@string/library_tab_artists"
             android:textColor="@color/text_muted"
             android:textSize="17sp" />
+
+        <TextView
+            android:id="@+id/libraryTabAlbums"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:clickable="true"
+            android:focusable="true"
+            android:paddingStart="12dp"
+            android:paddingEnd="12dp"
+            android:paddingBottom="6dp"
+            android:text="@string/library_tab_albums"
+            android:textColor="@color/text_muted"
+            android:textSize="17sp" />
     </LinearLayout>
     </HorizontalScrollView>
 

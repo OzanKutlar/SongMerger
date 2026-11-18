@@ -19,3 +19,6 @@ data class Track(
 
 /** An artist and every song they appear on. An empty [name] means the artist is unknown. */
 data class Artist(val name: String, val tracks: List<Track>)
+
+/** An album, its primary display artist, and every song belonging to it. */
+data class Album(val name: String, val artist: String, val tracks: List<Track>)

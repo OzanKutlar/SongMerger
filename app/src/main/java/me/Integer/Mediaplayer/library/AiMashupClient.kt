@@ -144,12 +144,18 @@ class AiMashupClient(context: Context, baseUrl: String, token: String = "") {
     }
 
     /** Asks for mashups made from the analysed songs [ids]. */
-    fun route(ids: List<String>, playlistCount: Int, tracksPerPlaylist: Int): List<RemoteMix> {
+    fun route(
+        ids: List<String>,
+        playlistCount: Int,
+        tracksPerPlaylist: Int,
+        seedTrackId: String = ""
+    ): List<RemoteMix> {
         val body = encoding {
             JSONObject()
                 .put("track_ids", JSONArray(ids))
                 .put("playlist_count", playlistCount)
                 .put("tracks_per_playlist", tracksPerPlaylist)
+                .put("seed_track_id", seedTrackId)
         }
         val answer = postJson(PATH_ROUTE, body, ROUTE_TIMEOUT_MS)
         val array = answer.optJSONArray("playlists") ?: throw ServerException("the route answer is incomplete")

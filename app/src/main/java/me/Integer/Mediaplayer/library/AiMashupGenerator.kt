@@ -34,6 +34,13 @@ class AiMashupGenerator private constructor(context: Context) {
 
     enum class Failure { NONE, NO_SERVER, TOO_FEW_SONGS, SERVER, NO_ROUTES }
 
+    /** Parameters for a mashup generation run. */
+    data class Options(
+        val playlistCount: Int = DEFAULT_PLAYLIST_COUNT,
+        val tracksPerPlaylist: Int = DEFAULT_TRACKS_PER_PLAYLIST,
+        val seedTrackUri: String = ""
+    )
+
     /** One generated mashup; [route] is its compact text form. */
     data class Mix(val name: String, val score: Double, val segments: List<MixSegment>, val route: String)
 
@@ -76,6 +83,8 @@ class AiMashupGenerator private constructor(context: Context) {
     private var generation = 0L
     private var cancelFlag: AtomicBoolean? = null
 
+    private var activeOptions = Options()
+
     var state: State = State()
         private set
 
@@ -95,20 +104,24 @@ class AiMashupGenerator private constructor(context: Context) {
      *
      * @return false when a run is already active or it cannot start; the reason is in [state]
      */
-    fun start(source: List<Track>): Boolean {
+    fun start(source: List<Track>, options: Options = Options()): Boolean {
         if (state.isRunning) return false
         val url = repository.settings.aiServerUrl
         if (url.isEmpty()) {
             publish(State(Phase.FAILED, failure = Failure.NO_SERVER))
             return false
         }
-        val items = pick(source).map { remoteOf(it) }
+        activeOptions = options.copy(
+            playlistCount = options.playlistCount.coerceIn(1, MAX_MIXES),
+            tracksPerPlaylist = options.tracksPerPlaylist.coerceIn(MIN_TRACKS, MAX_SOURCE_TRACKS)
+        )
+        val items = pick(source, activeOptions.seedTrackUri).map { remoteOf(it) }
         if (items.size < MIN_TRACKS) {
             publish(State(Phase.FAILED, failure = Failure.TOO_FEW_SONGS))
             return false
         }
         jobStore.clear()
-        launch(url) { run, cancelled, client -> generate(run, cancelled, client, items, url) }
+        launch(url) { run, cancelled, client -> generate(run, cancelled, client, items, url, activeOptions) }
         return true
     }
 
@@ -186,7 +199,8 @@ class AiMashupGenerator private constructor(context: Context) {
         cancelled: AtomicBoolean,
         client: AiMashupClient,
         items: List<AiMashupClient.RemoteTrack>,
-        url: String
+        url: String,
+        options: Options = activeOptions
     ) {
         val device = client.ping().device
         val report = client.checkCache(items)
@@ -200,7 +214,7 @@ class AiMashupGenerator private constructor(context: Context) {
             followJob(run, cancelled, client, jobId, toAnalyse.size, device, notSent.size)
         }
         if (cancelled.get()) return
-        route(run, client, items, device, recheck = report.missing.isNotEmpty())
+        route(run, client, items, device, recheck = report.missing.isNotEmpty(), options = options)
     }
 
     /** Follows a remembered job; a job the server no longer knows starts a fresh run. */
@@ -234,7 +248,8 @@ class AiMashupGenerator private constructor(context: Context) {
         client: AiMashupClient,
         items: List<AiMashupClient.RemoteTrack>,
         device: String,
-        recheck: Boolean
+        recheck: Boolean,
+        options: Options = activeOptions
     ) {
         val unusable = if (recheck) client.checkCache(items).missing else emptySet()
         val ready = items.filter { it.id !in unusable }
@@ -244,7 +259,13 @@ class AiMashupGenerator private constructor(context: Context) {
             return
         }
         post(run, State(Phase.ROUTING, skipped = skipped, device = device))
-        val remote = client.route(ready.map { it.id }, PLAYLIST_COUNT, TRACKS_PER_PLAYLIST)
+        val seedId = if (options.seedTrackUri.isNotEmpty()) idOf(options.seedTrackUri) else ""
+        val remote = client.route(
+            ready.map { it.id },
+            options.playlistCount,
+            options.tracksPerPlaylist,
+            seedId
+        )
         post(run, finished(remote, ready, skipped))
     }
 
@@ -404,14 +425,17 @@ class AiMashupGenerator private constructor(context: Context) {
         for (listener in ArrayList(listeners)) listener.onMashupStateChanged(next)
     }
 
-    /** Each song once, without songs too short to analyse, and at most [MAX_SOURCE_TRACKS]. */
-    private fun pick(source: List<Track>): List<Track> {
+    /** Each song once, without songs too short to analyse, keeping [seedUri] if chosen, up to [MAX_SOURCE_TRACKS]. */
+    private fun pick(source: List<Track>, seedUri: String = ""): List<Track> {
         val usable = source.asSequence()
             .filter { it.uri.isNotEmpty() }
             .filter { it.durationMs == 0L || it.durationMs >= MIN_DURATION_MS }
             .distinctBy { it.uri }
             .toList()
-        return if (usable.size <= MAX_SOURCE_TRACKS) usable else usable.shuffled().take(MAX_SOURCE_TRACKS)
+        if (usable.size <= MAX_SOURCE_TRACKS) return usable
+        val seed = usable.firstOrNull { it.uri == seedUri }
+        val rest = usable.filter { it.uri != seedUri }.shuffled()
+        return if (seed != null) listOf(seed) + rest.take(MAX_SOURCE_TRACKS - 1) else rest.take(MAX_SOURCE_TRACKS)
     }
 
     private fun remoteOf(track: Track): AiMashupClient.RemoteTrack {
@@ -450,8 +474,8 @@ class AiMashupGenerator private constructor(context: Context) {
 
         /** The server does not analyse songs shorter than 18 seconds. */
         private const val MIN_DURATION_MS = 20000L
-        private const val PLAYLIST_COUNT = 3
-        private const val TRACKS_PER_PLAYLIST = 5
+        const val DEFAULT_PLAYLIST_COUNT = 3
+        const val DEFAULT_TRACKS_PER_PLAYLIST = 5
         private const val MAX_MIXES = 20
 
         /** Songs sent at the same time; more rarely helps on Wi-Fi. */

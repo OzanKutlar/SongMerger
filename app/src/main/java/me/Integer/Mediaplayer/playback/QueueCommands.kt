@@ -26,8 +26,14 @@ internal object QueueCommands {
      */
     const val ACTION_RESTORE_LAST = "me.Integer.Mediaplayer.RESTORE_LAST"
 
+    /** Sets or cancels a sleep timer in [PlaybackService]. Arguments: [ARG_MINUTES], [ARG_END_OF_TRACK]. */
+    const val ACTION_SET_SLEEP_TIMER = "me.Integer.Mediaplayer.SET_SLEEP_TIMER"
+
     const val ARG_ENABLED = "enabled"
     const val ARG_UIDS = "uids"
+    const val ARG_MINUTES = "sleep_minutes"
+    const val ARG_END_OF_TRACK = "sleep_end_of_track"
+    const val ARG_SLEEP_REMAINING_MS = "sleep_remaining_ms"
 
     /** The highest slot id in the queue, so new songs get ids above it. */
     const val ARG_MAX_UID = "max_uid"
@@ -54,6 +60,7 @@ internal object QueueCommands {
     val ADOPT_ORDER = SessionCommand(ACTION_ADOPT_ORDER, Bundle.EMPTY)
     val GET_STATE = SessionCommand(ACTION_GET_STATE, Bundle.EMPTY)
     val RESTORE_LAST = SessionCommand(ACTION_RESTORE_LAST, Bundle.EMPTY)
+    val SET_SLEEP_TIMER = SessionCommand(ACTION_SET_SLEEP_TIMER, Bundle.EMPTY)
 
     /** The slot id of [item], or 0 when it has none. */
     fun uidOf(item: MediaItem): Long {

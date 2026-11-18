@@ -46,6 +46,8 @@ class PlayerConnection(
     private var controller: MediaController? = null
 
     private var shuffleEnabled = false
+    private var sleepDeadlineElapsedMs = 0L
+    private var sleepEndOfTrack = false
     private var nextUid = 1L
     private var queue = TimelineQueue.EMPTY
     private var publishQueued = false
@@ -167,6 +169,9 @@ class PlayerConnection(
             Log.w(TAG, "the shuffle state was refused with code ${result.resultCode}")
             return
         }
+        val rem = result.extras.getLong(QueueCommands.ARG_SLEEP_REMAINING_MS, 0L)
+        sleepEndOfTrack = rem == -1L
+        sleepDeadlineElapsedMs = if (rem > 0L) SystemClock.elapsedRealtime() + rem else 0L
         val enabled = result.extras.getBoolean(QueueCommands.ARG_ENABLED, shuffleEnabled)
         if (enabled == shuffleEnabled) return
         shuffleEnabled = enabled
@@ -512,6 +517,29 @@ class PlayerConnection(
             Player.REPEAT_MODE_ALL -> Player.REPEAT_MODE_ONE
             else -> Player.REPEAT_MODE_OFF
         }
+    }
+
+    /** Sets or cancels the sleep timer (0 minutes & endOfTrack=false cancels). */
+    fun setSleepTimer(minutes: Int, endOfTrack: Boolean = false) {
+        val player = controller ?: return
+        sleepEndOfTrack = endOfTrack
+        sleepDeadlineElapsedMs = if (!endOfTrack && minutes > 0) {
+            SystemClock.elapsedRealtime() + minutes * 60_000L
+        } else {
+            0L
+        }
+        val args = Bundle().apply {
+            putInt(QueueCommands.ARG_MINUTES, minutes)
+            putBoolean(QueueCommands.ARG_END_OF_TRACK, endOfTrack)
+        }
+        send(player, QueueCommands.SET_SLEEP_TIMER, args)
+    }
+
+    /** Remaining sleep timer milliseconds, -1 if set to end of current track, or 0 if off. */
+    fun sleepTimerRemainingMs(): Long {
+        if (sleepEndOfTrack) return -1L
+        val rem = sleepDeadlineElapsedMs - SystemClock.elapsedRealtime()
+        return if (rem > 0L) rem else 0L
     }
 
     // ------------------------------------------------------------------ snapshot

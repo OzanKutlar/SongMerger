@@ -9,6 +9,7 @@ import androidx.recyclerview.widget.RecyclerView
 import me.Integer.Mediaplayer.R
 import me.Integer.Mediaplayer.library.LibraryRepository
 import me.Integer.Mediaplayer.library.Track
+import me.Integer.Mediaplayer.ui.widgets.FastScroller
 import me.Integer.Mediaplayer.ui.widgets.PressFeedback
 
 /** One artist and every song they appear on, alone or with others. */
@@ -42,6 +43,7 @@ class ArtistFragment : Fragment(R.layout.fragment_artist), LibraryRepository.Lis
         list = view.findViewById(R.id.artistList)
         list.layoutManager = LinearLayoutManager(requireContext())
         list.adapter = adapter
+        FastScroller.attach(list) { index -> FastScroller.initialOf(tracks.getOrNull(index)?.title) }
     }
 
     private fun wireButtons(view: View) {

@@ -131,6 +131,11 @@ def score_transition(
     pos_in = float(in_cue.get("pos_ratio", 0.2))
     flow_bonus = (0.06 if pos_out >= 0.45 else -0.04) + (0.06 if pos_in <= 0.45 else -0.03)
 
+    # Vocal clash avoidance: penalize overlapping two windows that both have strong lead vocals
+    v_out = float(out_w.get("vocal", 0.0))
+    v_in = float(in_w.get("vocal", 0.0))
+    vocal_clash = max(0.0, (v_out * v_in) - 0.18) * 0.22
+
     raw = (
         0.28 * harmonic
         + 0.24 * timbral
@@ -138,6 +143,7 @@ def score_transition(
         + 0.16 * energy_score
         + 0.10 * centroid_score
         + flow_bonus
+        - vocal_clash
     )
     return float(np.clip(raw, 0.0, 1.0))
 
@@ -276,6 +282,10 @@ def _pair_scores(cues: list[dict[str, Any]], cue_bpms: list[float]) -> np.ndarra
     pos_in = _values(cues, "pos_ratio", 0.2)
     flow = np.where(pos_out >= 0.45, 0.06, -0.04)[:, None] + np.where(pos_in <= 0.45, 0.06, -0.03)[None, :]
 
+    v_out = _values(outs, "vocal", 0.0)[:, None]
+    v_in = _values(ins, "vocal", 0.0)[None, :]
+    vocal_clash = np.maximum(0.0, (v_out * v_in) - 0.18) * 0.22
+
     raw = (
         0.28 * harmonic
         + 0.24 * timbral
@@ -283,6 +293,7 @@ def _pair_scores(cues: list[dict[str, Any]], cue_bpms: list[float]) -> np.ndarra
         + 0.16 * energy
         + 0.10 * centroid
         + flow
+        - vocal_clash
     )
     return np.clip(raw, 0.0, 1.0).astype(np.float32)
 
@@ -420,11 +431,17 @@ def generate_mashup_playlists(
     profiles: list[dict[str, Any]],
     playlist_count: int = 3,
     tracks_per_playlist: int = 5,
+    seed_track_id: str = "",
 ) -> list[dict[str, Any]]:
     """Generates up to playlist_count diverse seamless DJ mashup playlists."""
     usable = _unique_usable(profiles)
     if len(usable) < 2:
         return []
+    if seed_track_id:
+        seed_matches = [p for p in usable if str(p.get("track_id", "")) == seed_track_id]
+        if seed_matches:
+            others = [p for p in usable if str(p.get("track_id", "")) != seed_track_id]
+            usable = seed_matches + others
     table = CueTable(usable)
 
     target_len = min(max(2, tracks_per_playlist), len(usable))
@@ -432,7 +449,7 @@ def generate_mashup_playlists(
     results: list[dict[str, Any]] = []
 
     for p_idx in range(max(1, min(playlist_count, len(usable)))):
-        start_track = usable[p_idx % len(usable)]
+        start_track = usable[0] if (seed_track_id and p_idx == 0) else usable[p_idx % len(usable)]
         # Beam state: (total_score, visited_ids, segments, last_in_ms)
         beam: list[tuple[float, list[str], list[dict[str, Any]], int]] = [
             (

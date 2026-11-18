@@ -4,7 +4,9 @@ import argparse
 import hmac
 import json
 import os
+import socket
 import tempfile
+import threading
 import time
 import wave
 from http import HTTPStatus
@@ -31,6 +33,8 @@ LOCAL_HOSTS = ("127.0.0.1", "localhost", "::1")
 MAX_PLAYLISTS = 20
 MAX_TRACKS_PER_PLAYLIST = 50
 MATRIX_TOLERANCE = 1e-3
+DISCOVERY_PORT = 8766
+DISCOVERY_MAGIC = b"AIDJ_DISCOVER_V1"
 
 
 def default_workers() -> int:
@@ -200,7 +204,8 @@ def make_handler(ctx: RouterContext) -> type[BaseHTTPRequestHandler]:
                     profiles.append(p)
             playlist_count = bounded_int(data.get("playlist_count"), 3, 1, MAX_PLAYLISTS)
             tracks_per = bounded_int(data.get("tracks_per_playlist"), 5, 2, MAX_TRACKS_PER_PLAYLIST)
-            playlists = generate_mashup_playlists(profiles, playlist_count, tracks_per)
+            seed_id = str(data.get("seed_track_id") or "").strip()
+            playlists = generate_mashup_playlists(profiles, playlist_count, tracks_per, seed_id)
             self._send_json(HTTPStatus.OK, {"playlists": playlists})
 
     return Handler
@@ -280,6 +285,32 @@ def run_self_test(device: str, workers: int, device_label: str) -> None:
         print(f"Self-test passed! Sample route: {playlists[0]['route_string']}")
 
 
+def _run_discovery_responder(http_port: int, device_label: str, stop_event: threading.Event) -> None:
+    """Answers UDP LAN discovery broadcasts from the phone so users need not type the IP."""
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        sock.bind(("0.0.0.0", DISCOVERY_PORT))
+        sock.settimeout(1.0)
+    except OSError as exc:
+        print(f"[ai_router] LAN discovery responder disabled (port {DISCOVERY_PORT}): {exc}")
+        return
+    payload = json.dumps({"service": "ai_dj_router", "port": http_port, "device": device_label}).encode("utf-8")
+    with sock:
+        while not stop_event.is_set():
+            try:
+                data, addr = sock.recvfrom(256)
+            except TimeoutError:
+                continue
+            except OSError:
+                break
+            if data.strip() == DISCOVERY_MAGIC:
+                try:
+                    sock.sendto(payload, addr)
+                except OSError:
+                    pass
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="AI DJ Mashup Routing Server")
     parser.add_argument("--host", default="0.0.0.0")
@@ -324,6 +355,14 @@ def main() -> None:
         print("[ai_router] WARNING: no --token set; anyone on the network can use this server")
     ctx = RouterContext(args.cache_dir, device, label, workers, token)
     server = ThreadingHTTPServer((args.host, args.port), make_handler(ctx))
+    stop_beacon = threading.Event()
+    beacon_thread = threading.Thread(
+        target=_run_discovery_responder,
+        args=(args.port, label, stop_beacon),
+        daemon=True,
+        name="lan-discovery",
+    )
+    beacon_thread.start()
     print(
         f"AI DJ Router listening on http://{args.host}:{args.port} "
         f"(device={label}, workers={workers}, cached={ctx.cache.count()}, auth={'token' if token else 'off'})"
@@ -333,6 +372,7 @@ def main() -> None:
     except KeyboardInterrupt:
         print("\nShutting down...")
     finally:
+        stop_beacon.set()
         ctx.runner.shutdown()
         server.server_close()
 

@@ -42,6 +42,7 @@ class LibraryRepository private constructor(appContext: Context) {
     private var loadStarted = false
     private var uriIndex: Map<String, Track>? = null
     private var artistsCache: List<Artist>? = null
+    private var albumsCache: List<Album>? = null
     private val artistsOfCache = HashMap<String, List<String>>()
     private val displayArtistCache = HashMap<String, String>()
 
@@ -195,6 +196,13 @@ class LibraryRepository private constructor(appContext: Context) {
         }
     }
 
+    /** Every album with its primary display artist and songs. */
+    fun albums(): List<Album> {
+        synchronized(cacheLock) {
+            return albumsCache ?: AlbumGrouper.group(tracks) { displayArtist(it) }.also { albumsCache = it }
+        }
+    }
+
     /** Call after changing the separator, favorites or a manual split, so the screens update. */
     fun notifyArtistRulesChanged() {
         invalidateArtistCaches()
@@ -206,6 +214,7 @@ class LibraryRepository private constructor(appContext: Context) {
     private fun invalidateArtistCaches() {
         synchronized(cacheLock) {
             artistsCache = null
+            albumsCache = null
             artistsOfCache.clear()
             displayArtistCache.clear()
         }

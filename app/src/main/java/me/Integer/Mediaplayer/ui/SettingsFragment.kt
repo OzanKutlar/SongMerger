@@ -16,6 +16,7 @@ import androidx.core.widget.doAfterTextChanged
 import androidx.fragment.app.Fragment
 import me.Integer.Mediaplayer.R
 import me.Integer.Mediaplayer.library.AiMashupClient
+import me.Integer.Mediaplayer.library.AiServerDiscovery
 import me.Integer.Mediaplayer.library.ArtistSplitter
 import me.Integer.Mediaplayer.library.LibraryRepository
 import me.Integer.Mediaplayer.library.MusicFolderStore
@@ -151,6 +152,26 @@ class SettingsFragment : Fragment(R.layout.fragment_settings), LibraryRepository
         }
         view.findViewById<View>(R.id.settingsAiSave).setOnClickListener { saveAiServer() }
         view.findViewById<View>(R.id.settingsAiTest).setOnClickListener { testAiServer() }
+        view.findViewById<View>(R.id.settingsAiDiscover).setOnClickListener { discoverAiServer() }
+    }
+
+    /** Broadcasts a LAN UDP probe to locate a running ai_router/server.py on Wi-Fi. */
+    private fun discoverAiServer() {
+        val run = ++testGeneration
+        aiStatusView.setText(R.string.settings_ai_discovering)
+        worker.execute {
+            val found = AiServerDiscovery.discover()
+            main.post {
+                if (!isAdded || view == null || run != testGeneration) return@post
+                if (found != null) {
+                    aiServerInput.setText(found.url)
+                    repository.settings.aiServerUrl = found.url
+                    aiStatusView.text = getString(R.string.settings_ai_discovered, found.url, found.device)
+                } else {
+                    aiStatusView.setText(R.string.settings_ai_not_found)
+                }
+            }
+        }
     }
 
     /** A blank field clears the address; an unusable one is refused. */

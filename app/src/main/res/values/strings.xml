@@ -13,6 +13,7 @@
     <string name="library_tab_songs">Tracks</string>
     <string name="library_tab_favorites">Favorites</string>
     <string name="library_tab_artists">Artists</string>
+    <string name="library_tab_albums">Albums</string>
     <string name="library_tab_playlists">Playlists</string>
     <string name="library_sort">Sort order</string>
     <string name="library_shuffle_all">Shuffle all</string>
@@ -54,8 +55,19 @@
     <string name="menu_view_album">View album</string>
     <string name="menu_view_artist">View artist</string>
     <string name="menu_current_queue">Current queue</string>
+    <string name="menu_view_lyrics">Lyrics</string>
+    <string name="menu_sleep_timer">Sleep timer</string>
     <string name="menu_split_artists">Manually split artists</string>
     <string name="menu_track_details">Track details</string>
+    <string name="lyrics_empty">No synchronized (.lrc) or embedded lyrics found for this song.</string>
+    <string name="sleep_option_minutes">%1$d minutes</string>
+    <string name="sleep_option_end_of_track">End of current track</string>
+    <string name="sleep_option_off">Turn off timer</string>
+    <string name="sleep_status_minutes">%1$d min left</string>
+    <string name="sleep_status_end_of_track">End of track</string>
+    <string name="sleep_toast_set">Sleep timer set for %1$d minutes</string>
+    <string name="sleep_toast_end_of_track">Playback will stop at the end of this track</string>
+    <string name="sleep_toast_off">Sleep timer turned off</string>
     <string name="choose_artist_title">Select artist</string>
     <string name="toast_play_next">Playing next: %1$s</string>
     <string name="toast_added_to_queue">Added to queue: %1$s</string>
@@ -111,6 +123,12 @@
     <string name="playlist_mix_count">%1$s &#183; AI mashup with %2$d steps</string>
     <string name="playlist_mix_cues">%1$s  &#183;  %2$s</string>
     <string name="playlist_mix_end">end</string>
+    <string name="playlist_import_m3u">Import M3U / M3U8 file</string>
+    <string name="playlist_export_m3u">Export as M3U8</string>
+    <string name="playlist_m3u_exported">Playlist exported as M3U8</string>
+    <string name="playlist_m3u_imported">Imported %1$s (%2$d songs)</string>
+    <string name="playlist_m3u_empty">No matching songs in your library for that M3U file</string>
+    <string name="playlist_m3u_failed">Could not read or write the M3U8 file</string>
 
     <!-- Import Playlist -->
     <string name="import_playlist_title">Import playlist</string>
@@ -164,6 +182,25 @@
     <string name="mashup_set_server">Set address</string>
     <string name="mashup_play_now">Play now</string>
     <string name="mashup_save">Save as playlist</string>
+    <string name="mashup_start">Generate</string>
+    <string name="mashup_opt_count">Mashups to generate: %1$d</string>
+    <string name="mashup_opt_tracks">Songs per mashup: %1$d</string>
+    <string name="mashup_opt_seed">Starting song: %1$s  (tap to change)</string>
+    <string name="mashup_opt_seed_any">Automatic (best flow)</string>
+    <string name="mashup_opt_seed_choose">Choose starting song</string>
+    <string name="mashup_edit_step">Edit mix step</string>
+    <string name="mashup_step_title">Step #%1$d · %2$s</string>
+    <string name="mashup_step_entry">Entry point: %1$s</string>
+    <string name="mashup_step_exit">Exit point: %1$s</string>
+    <string name="mashup_step_fade">Crossfade duration: %1$s</string>
+    <string name="mashup_step_tempo">Initial tempo ratio: %1$s</string>
+    <string name="mashup_edit_route">Edit / copy mashup route</string>
+    <string name="mashup_copy_route">Copy</string>
+    <string name="mashup_route_help">Format: Song A,1:45,Song B,0:33,Song B,2:45,Song C,0:15</string>
+    <string name="mashup_route_hint">Song A,1:45,Song B,0:33</string>
+    <string name="mashup_route_invalid">Could not parse route or find all songs in your library</string>
+    <string name="mashup_route_saved">Mashup route updated</string>
+    <string name="mashup_route_copied">Mashup route copied to clipboard</string>
     <string name="mashup_saved_one">Saved as %1$s</string>
     <plurals name="mashup_saved">
         <item quantity="one">Saved %1$d mashup playlist</item>
@@ -233,6 +270,10 @@
     <string name="settings_ai_token_hint">Server token (optional)</string>
     <string name="settings_ai_save">Save</string>
     <string name="settings_ai_test">Test</string>
+    <string name="settings_ai_discover">Find on LAN</string>
+    <string name="settings_ai_discovering">Searching local Wi-Fi network&#8230;</string>
+    <string name="settings_ai_discovered">Found server at %1$s (%2$s)</string>
+    <string name="settings_ai_not_found">No AI mashup server answered on the local network</string>
     <string name="settings_ai_saved">Server address saved</string>
     <string name="settings_ai_cleared">Server address cleared</string>
     <string name="settings_ai_empty">Enter an address first</string>

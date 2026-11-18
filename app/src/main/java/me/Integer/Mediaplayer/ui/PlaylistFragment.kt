@@ -14,11 +14,14 @@ import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import me.Integer.Mediaplayer.R
 import me.Integer.Mediaplayer.library.LibraryRepository
+import me.Integer.Mediaplayer.library.M3uCodec
 import me.Integer.Mediaplayer.library.MixSegment
 import me.Integer.Mediaplayer.library.Playlist
 import me.Integer.Mediaplayer.library.Track
+import me.Integer.Mediaplayer.ui.widgets.FastScroller
 import me.Integer.Mediaplayer.ui.widgets.PressFeedback
 import java.io.File
+import java.io.IOException
 
 /**
  * One playlist: its cover, name and songs. Songs are reordered by holding and dragging a
@@ -54,6 +57,11 @@ class PlaylistFragment : Fragment(R.layout.fragment_playlist), LibraryRepository
 
     private val pickImage =
         registerForActivityResult(ActivityResultContracts.GetContent()) { uri -> onImagePicked(uri) }
+
+    private val exportM3uLauncher =
+        registerForActivityResult(ActivityResultContracts.CreateDocument("audio/x-mpegurl")) { uri ->
+            if (uri != null) writeM3uToUri(uri)
+        }
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
@@ -132,6 +140,7 @@ class PlaylistFragment : Fragment(R.layout.fragment_playlist), LibraryRepository
         )
         list.layoutManager = LinearLayoutManager(requireContext())
         list.adapter = adapter
+        FastScroller.attach(list) { index -> FastScroller.initialOf(tracks.getOrNull(index)?.title) }
         createDragHelper().attachToRecyclerView(list)
     }
 
@@ -192,12 +201,16 @@ class PlaylistFragment : Fragment(R.layout.fragment_playlist), LibraryRepository
         val popup = PopupMenu(requireContext(), anchor)
         popup.menu.add(0, ID_RENAME, 0, R.string.playlist_rename)
         popup.menu.add(0, ID_COVER, 1, R.string.playlist_change_cover)
-        popup.menu.add(0, ID_DELETE, 2, R.string.playlist_delete)
-        popup.menu.add(0, ID_MASHUP, 3, R.string.mashup_from_playlist)
+        popup.menu.add(0, ID_EDIT_ROUTE, 2, R.string.mashup_edit_route)
+        popup.menu.add(0, ID_EXPORT_M3U, 3, R.string.playlist_export_m3u)
+        popup.menu.add(0, ID_MASHUP, 4, R.string.mashup_from_playlist)
+        popup.menu.add(0, ID_DELETE, 5, R.string.playlist_delete)
         popup.setOnMenuItemClickListener { item ->
             when (item.itemId) {
                 ID_RENAME -> PlaylistDialogs.rename(requireContext(), repository, playlist)
                 ID_COVER -> changeCover()
+                ID_EDIT_ROUTE -> MashupStepDialog.showRouteEditor(requireContext(), repository, playlist)
+                ID_EXPORT_M3U -> exportM3uLauncher.launch("${playlist.name}.m3u8")
                 ID_DELETE -> PlaylistDialogs.confirmDelete(requireContext(), repository, playlist) { navigator.goBack() }
                 ID_MASHUP -> AiMashupDialog.startFrom(requireContext(), repository, host, tracks)
             }
@@ -206,19 +219,43 @@ class PlaylistFragment : Fragment(R.layout.fragment_playlist), LibraryRepository
         popup.show()
     }
 
+    private fun writeM3uToUri(uri: Uri) {
+        val playlist = repository.playlists.get(playlistId) ?: return
+        val content = M3uCodec.encode(
+            playlist,
+            trackOf = { repository.findTrack(it) },
+            artistOf = { repository.displayArtist(it) }
+        )
+        try {
+            requireContext().contentResolver.openOutputStream(uri, "wt")?.use { out ->
+                out.write(content.toByteArray(Charsets.UTF_8))
+            }
+            Toast.makeText(requireContext(), R.string.playlist_m3u_exported, Toast.LENGTH_SHORT).show()
+        } catch (_: IOException) {
+            Toast.makeText(requireContext(), R.string.playlist_m3u_failed, Toast.LENGTH_SHORT).show()
+        } catch (_: RuntimeException) {
+            Toast.makeText(requireContext(), R.string.playlist_m3u_failed, Toast.LENGTH_SHORT).show()
+        }
+    }
+
     private fun showTrackMenu(track: Track, anchor: View) {
         val context = requireContext()
         val id = playlistId
+        val playlist = repository.playlists.get(id)
         val popup = PopupMenu(context, anchor)
         popup.menu.add(0, ID_PLAY_NEXT, 0, R.string.menu_play_next)
         popup.menu.add(0, ID_ADD_QUEUE, 1, R.string.menu_add_queue)
-        popup.menu.add(0, ID_USE_COVER, 2, R.string.playlist_use_cover)
-        popup.menu.add(0, ID_REMOVE, 3, R.string.playlist_remove_track)
-        popup.menu.add(0, ID_DETAILS, 4, R.string.menu_track_details)
+        if (playlist?.isMix == true) {
+            popup.menu.add(0, ID_EDIT_STEP, 2, R.string.mashup_edit_step)
+        }
+        popup.menu.add(0, ID_USE_COVER, 3, R.string.playlist_use_cover)
+        popup.menu.add(0, ID_REMOVE, 4, R.string.playlist_remove_track)
+        popup.menu.add(0, ID_DETAILS, 5, R.string.menu_track_details)
         popup.setOnMenuItemClickListener { item ->
             when (item.itemId) {
                 ID_PLAY_NEXT -> TrackMenu.playNext(context, track, host, repository)
                 ID_ADD_QUEUE -> host.connection.addToQueue(track, repository.displayArtist(track))
+                ID_EDIT_STEP -> if (playlist != null) MashupStepDialog.showStepEditor(context, repository, playlist, track)
                 ID_USE_COVER -> repository.playlists.setCover(id, Playlist.COVER_TRACK, track.uri)
                 ID_REMOVE -> repository.playlists.removeTrack(id, track.uri)
                 ID_DETAILS -> TrackDetailsDialog.show(context, repository, track)
@@ -315,6 +352,9 @@ class PlaylistFragment : Fragment(R.layout.fragment_playlist), LibraryRepository
         private const val ID_REMOVE = 7
         private const val ID_DETAILS = 8
         private const val ID_MASHUP = 9
+        private const val ID_EDIT_STEP = 10
+        private const val ID_EDIT_ROUTE = 11
+        private const val ID_EXPORT_M3U = 12
         private const val MAX_CUE_STEPS = 500
 
         fun create(playlistId: Long): PlaylistFragment {

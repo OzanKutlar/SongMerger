@@ -336,6 +336,35 @@
                         android:visibility="gone" />
                 </FrameLayout>
             </LinearLayout>
+
+            <!-- Inline synchronized/embedded lyrics stage -->
+            <FrameLayout
+                android:id="@+id/playerLyricsStage"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:alpha="0"
+                android:visibility="gone">
+
+                <androidx.recyclerview.widget.RecyclerView
+                    android:id="@+id/lyricsList"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:clipToPadding="false"
+                    android:paddingTop="28dp"
+                    android:paddingBottom="28dp" />
+
+                <TextView
+                    android:id="@+id/lyricsEmpty"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_gravity="center"
+                    android:gravity="center"
+                    android:padding="32dp"
+                    android:text="@string/lyrics_empty"
+                    android:textColor="@color/text_muted"
+                    android:textSize="16sp"
+                    android:visibility="gone" />
+            </FrameLayout>
         </FrameLayout>
 
         <include

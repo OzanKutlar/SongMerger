@@ -34,6 +34,8 @@ import kotlin.math.roundToLong
 internal class DjCrossfader(
     deckA: ExoPlayer,
     deckB: ExoPlayer,
+    private val eqA: BassSwapProcessor,
+    private val eqB: BassSwapProcessor,
     private val onActiveDeckChanged: (ExoPlayer) -> Unit
 ) {
 
@@ -44,11 +46,14 @@ internal class DjCrossfader(
     var activeDeck: ExoPlayer = deckA
         private set
     private var idleDeck: ExoPlayer = deckB
+    private var activeEq: BassSwapProcessor = eqA
+    private var idleEq: BassSwapProcessor = eqB
 
     private var stage = Stage.IDLE
     private var released = false
     private var ticking = false
     private var duckMultiplier = 1f
+    private var sleepMultiplier = 1f
 
     private var outgoingUid = 0L
     private var incomingUid = 0L
@@ -111,11 +116,20 @@ internal class DjCrossfader(
         }
     }
 
+    fun setSleepGain(gain: Float) {
+        sleepMultiplier = gain.coerceIn(0f, 1f)
+        if (stage == Stage.IDLE) {
+            activeDeck.volume = restVolume(activeDeck)
+        }
+    }
+
     /** Cancels any pending or running blend and restores the active deck to its volume. */
     fun abort() {
         main.removeCallbacks(triggerTask)
         if (stage == Stage.IDLE) return
         stage = Stage.IDLE
+        activeEq.bassCut = 0f
+        idleEq.bassCut = 0f
         stopDeck(idleDeck)
         activeDeck.volume = restVolume(activeDeck)
         resetSpeed(activeDeck)
@@ -293,6 +307,9 @@ internal class DjCrossfader(
         val incoming = idleDeck
         activeDeck = incoming
         idleDeck = outgoing
+        val outEq = activeEq
+        activeEq = idleEq
+        idleEq = outEq
 
         activeDeck.addListener(activeListener)
         idleDeck.addListener(idleListener)
@@ -337,6 +354,8 @@ internal class DjCrossfader(
 
     private fun finish() {
         stage = Stage.IDLE
+        activeEq.bassCut = 0f
+        idleEq.bassCut = 0f
         stopDeck(idleDeck)
         activeDeck.volume = restVolume(activeDeck)
         resetSpeed(activeDeck)
@@ -352,8 +371,12 @@ internal class DjCrossfader(
         val inGain = progress.pow(INCOMING_CURVE_EXP).coerceIn(0f, 1f)
         val outPhase = ((progress - OUTGOING_HOLD) / (1f - OUTGOING_HOLD)).coerceIn(0f, 1f)
         val outGain = cos(outPhase * HALF_PI).coerceIn(0f, 1f)
-        activeDeck.volume = inGain * duckMultiplier * incomingGain
-        idleDeck.volume = outGain * duckMultiplier * outgoingGain
+        val master = duckMultiplier * sleepMultiplier
+        activeDeck.volume = inGain * master * incomingGain
+        idleDeck.volume = outGain * master * outgoingGain
+        // DJ Bass-Swap: incoming low-end (<145 Hz) cuts initially and swaps with outgoing across 25%..65%
+        activeEq.bassCut = ((0.60f - progress) / 0.45f).coerceIn(0f, 1f)
+        idleEq.bassCut = ((progress - 0.30f) / 0.45f).coerceIn(0f, 1f)
     }
 
     /** Glides the incoming track's tempo back to 1.0x during the second half of the blend. */
@@ -364,9 +387,9 @@ internal class DjCrossfader(
         activeDeck.playbackParameters = PlaybackParameters(speed, 1f)
     }
 
-    /** The volume of a deck that is not blending: ducking times its song's correction. */
+    /** The volume of a deck that is not blending: ducking and sleep timer times its song's correction. */
     private fun restVolume(player: ExoPlayer): Float {
-        return duckMultiplier * QueueCommands.gainOf(player.currentMediaItem)
+        return duckMultiplier * sleepMultiplier * QueueCommands.gainOf(player.currentMediaItem)
     }
 
     private fun resetSpeed(player: ExoPlayer) {

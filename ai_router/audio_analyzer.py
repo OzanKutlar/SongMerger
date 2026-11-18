@@ -182,6 +182,41 @@ def _sample_rhythm_signature(
     return _safe_unit(combined, center=True).tolist()
 
 
+def _estimate_vocal_presence(
+    lo: int,
+    hi: int,
+    contrast: np.ndarray,
+    centroid: np.ndarray,
+    timbre_mfcc: np.ndarray,
+    rms: np.ndarray,
+) -> float:
+    """Estimates lead vocal activity in [0, 1] from mid-band harmonic contrast, centroid and MFCC modulation."""
+    if hi <= lo:
+        return 0.0
+    # Vocal formants sit primarily in 300 Hz - 3.2 kHz (spectral contrast bands 1, 2, 3)
+    mid_contrast = float(np.mean(contrast[1:4, lo:hi])) if contrast.shape[0] >= 4 else 20.0
+    low_high_contrast = float(np.mean(contrast[[0, -1], lo:hi])) if contrast.shape[0] >= 2 else 20.0
+    band_focus = float(np.clip((mid_contrast - 0.75 * low_high_contrast) / 18.0, 0.0, 1.0))
+
+    cent = float(np.mean(centroid[lo:hi]))
+    # Lead vocals typically pull spectral centroid toward 1100 - 2900 Hz
+    cent_score = math.exp(-((cent - 1950.0) / 1250.0) ** 2)
+
+    # syllabic vocal articulation modulates MFCCs 1..4 over 3-6 Hz
+    if hi - lo >= 4 and timbre_mfcc.shape[0] >= 4:
+        mfcc_diff = np.diff(timbre_mfcc[:4, lo:hi], axis=1)
+        articulation = float(np.clip(np.mean(np.std(mfcc_diff, axis=1)) / 14.0, 0.0, 1.0))
+    else:
+        articulation = 0.3
+
+    rms_peak = max(float(np.max(rms)), 1e-6)
+    rel_energy = float(np.clip(float(np.mean(rms[lo:hi])) / rms_peak, 0.0, 1.0))
+    if rel_energy < 0.12:
+        return 0.0
+    raw = (0.40 * band_focus + 0.32 * cent_score + 0.28 * articulation) * min(1.0, rel_energy * 1.35)
+    return round(float(np.clip(raw, 0.0, 1.0)), 4)
+
+
 def _window_stats(
     lo: int,
     hi: int,
@@ -203,6 +238,7 @@ def _window_stats(
         "centroid_hz": round(float(np.mean(centroid[lo:hi])), 2),
         "energy": round(float(np.mean(rms[lo:hi])), 6),
         "transient": round(float(np.mean(onset_env[lo:hi])), 4),
+        "vocal": _estimate_vocal_presence(lo, hi, contrast, centroid, timbre_mfcc, rms),
         "rhythm": _sample_rhythm_signature(onset_env, rms, lo, hi),
     }
 
@@ -243,6 +279,7 @@ def _extract_cue_descriptor(
         "centroid_hz": in_stats["centroid_hz"],
         "energy": in_stats["energy"],
         "transient": in_stats["transient"],
+        "vocal": in_stats["vocal"],
         # Directional descriptors for exact [out -> in] overlap matching
         "out": out_stats,
         "in": in_stats,

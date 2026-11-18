@@ -11,6 +11,10 @@ import android.view.animation.DecelerateInterpolator
 import android.view.inputmethod.InputMethodManager
 import android.widget.EditText
 import android.widget.TextView
+import android.net.Uri
+import android.view.ViewGroup
+import android.widget.Toast
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.widget.PopupMenu
 import androidx.core.content.ContextCompat
 import androidx.core.widget.doAfterTextChanged
@@ -19,14 +23,17 @@ import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import me.Integer.Mediaplayer.R
 import me.Integer.Mediaplayer.library.AiMashupGenerator
+import me.Integer.Mediaplayer.library.AlbumSorter
 import me.Integer.Mediaplayer.library.ArtistSorter
 import me.Integer.Mediaplayer.library.LibraryRepository
+import me.Integer.Mediaplayer.library.M3uCodec
 import me.Integer.Mediaplayer.library.PlaylistImporter
-import android.view.ViewGroup
 import me.Integer.Mediaplayer.library.Track
 import me.Integer.Mediaplayer.library.TrackSorter
+import me.Integer.Mediaplayer.ui.widgets.FastScroller
 import me.Integer.Mediaplayer.ui.widgets.PressFeedback
 import me.Integer.Mediaplayer.ui.widgets.SkeletonDrawable
+import java.io.IOException
 import java.util.Locale
 import java.util.concurrent.Executors
 import kotlin.math.abs
@@ -42,6 +49,7 @@ class LibraryFragment : Fragment(R.layout.fragment_library), LibraryRepository.L
     private lateinit var navigator: Navigator
     private lateinit var trackAdapter: TrackAdapter
     private lateinit var artistAdapter: ArtistAdapter
+    private lateinit var albumAdapter: AlbumAdapter
     private lateinit var playlistAdapter: PlaylistAdapter
     private lateinit var list: RecyclerView
     private lateinit var emptyView: TextView
@@ -49,7 +57,12 @@ class LibraryFragment : Fragment(R.layout.fragment_library), LibraryRepository.L
     private lateinit var songsTab: TextView
     private lateinit var favoritesTab: TextView
     private lateinit var artistsTab: TextView
+    private lateinit var albumsTab: TextView
     private lateinit var playlistsTab: TextView
+
+    private val pickM3uFile = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) importM3uFromUri(uri)
+    }
     private lateinit var addButton: View
     private lateinit var searchBar: View
     private lateinit var searchInput: EditText
@@ -156,6 +169,7 @@ class LibraryFragment : Fragment(R.layout.fragment_library), LibraryRepository.L
         songsTab = view.findViewById(R.id.libraryTabSongs)
         favoritesTab = view.findViewById(R.id.libraryTabFavorites)
         artistsTab = view.findViewById(R.id.libraryTabArtists)
+        albumsTab = view.findViewById(R.id.libraryTabAlbums)
         playlistsTab = view.findViewById(R.id.libraryTabPlaylists)
         addButton = view.findViewById(R.id.libraryAdd)
         searchBar = view.findViewById(R.id.librarySearchBar)
@@ -166,6 +180,23 @@ class LibraryFragment : Fragment(R.layout.fragment_library), LibraryRepository.L
         shuffleButton = view.findViewById(R.id.libraryShuffle)
         playAllButton = view.findViewById(R.id.libraryPlayAll)
         list.layoutManager = LinearLayoutManager(requireContext())
+        FastScroller.attach(list) { index -> sectionLabelAt(index) }
+    }
+
+    private fun sectionLabelAt(index: Int): String {
+        return when (activeTab) {
+            TAB_ARTISTS -> FastScroller.initialOf(artistAdapter.rows().getOrNull(index)?.name)
+            TAB_ALBUMS -> FastScroller.initialOf(albumAdapter.rows().getOrNull(index)?.name)
+            TAB_PLAYLISTS -> FastScroller.initialOf(playlistAdapter.rows().getOrNull(index)?.name)
+            else -> {
+                val track = trackAdapter.rows().getOrNull(index) ?: return "#"
+                if (repository.settings.trackSort == TrackSorter.BY_ARTIST) {
+                    FastScroller.initialOf(repository.displayArtist(track))
+                } else {
+                    FastScroller.initialOf(track.title)
+                }
+            }
+        }
     }
 
     private fun createAdapters() {
@@ -178,6 +209,7 @@ class LibraryFragment : Fragment(R.layout.fragment_library), LibraryRepository.L
             onMenu = { track, anchor -> TrackMenu.show(anchor, track, host, repository) }
         )
         artistAdapter = ArtistAdapter(thumbnails) { artist -> navigator.openArtist(artist.name) }
+        albumAdapter = AlbumAdapter(thumbnails) { album -> navigator.openAlbum(album.name) }
         playlistAdapter = PlaylistAdapter(
             covers = PlaylistCoverLoader.get(requireContext()),
             onClick = { playlist -> navigator.openPlaylist(playlist.id) },
@@ -196,6 +228,7 @@ class LibraryFragment : Fragment(R.layout.fragment_library), LibraryRepository.L
         songsTab.setOnClickListener { selectTab(TAB_SONGS) }
         favoritesTab.setOnClickListener { selectTab(TAB_FAVORITES) }
         artistsTab.setOnClickListener { selectTab(TAB_ARTISTS) }
+        albumsTab.setOnClickListener { selectTab(TAB_ALBUMS) }
         playlistsTab.setOnClickListener { selectTab(TAB_PLAYLISTS) }
     }
 
@@ -234,6 +267,7 @@ class LibraryFragment : Fragment(R.layout.fragment_library), LibraryRepository.L
         val popup = PopupMenu(requireContext(), anchor)
         popup.menu.add(0, ID_QUEUE, 0, R.string.menu_current_queue)
         popup.menu.add(0, ID_IMPORT, 1, R.string.library_import_playlist)
+        popup.menu.add(0, ID_IMPORT_M3U, 1, R.string.playlist_import_m3u)
         popup.menu.add(0, ID_MASHUP, 1, R.string.library_ai_mashup)
         popup.menu.add(0, ID_RESCAN, 2, R.string.library_rescan)
         popup.menu.add(0, ID_SETTINGS, 3, R.string.library_settings)
@@ -241,6 +275,7 @@ class LibraryFragment : Fragment(R.layout.fragment_library), LibraryRepository.L
             when (item.itemId) {
                 ID_QUEUE -> navigator.openQueue()
                 ID_IMPORT -> ImportPlaylistDialog.startFlow(requireContext(), repository, host)
+                ID_IMPORT_M3U -> pickM3uFile.launch(arrayOf("audio/x-mpegurl", "application/vnd.apple.mpegurl", "text/plain", "*/*"))
                 ID_MASHUP -> AiMashupDialog.startFlow(requireContext(), repository, host)
                 ID_RESCAN -> repository.rescan()
                 ID_SETTINGS -> navigator.openSettings()
@@ -251,10 +286,68 @@ class LibraryFragment : Fragment(R.layout.fragment_library), LibraryRepository.L
     }
 
     private fun showSortMenu(anchor: View) {
-        if (activeTab == TAB_ARTISTS) {
-            showArtistSortMenu(anchor)
-        } else {
-            showTrackSortMenu(anchor)
+        when (activeTab) {
+            TAB_ARTISTS -> showArtistSortMenu(anchor)
+            TAB_ALBUMS -> showAlbumSortMenu(anchor)
+            else -> showTrackSortMenu(anchor)
+        }
+    }
+
+    private fun showAlbumSortMenu(anchor: View) {
+        val current = repository.settings.albumSort
+        val popup = PopupMenu(requireContext(), anchor)
+        for ((mode, label) in ALBUM_SORT_LABELS.withIndex()) {
+            popup.menu.add(0, mode, mode, label).isChecked = mode == current
+        }
+        popup.menu.setGroupCheckable(0, true, true)
+        popup.setOnMenuItemClickListener { item ->
+            repository.settings.albumSort = item.itemId
+            refresh()
+            replayRows()
+            true
+        }
+        popup.show()
+    }
+
+    private fun importM3uFromUri(uri: Uri) {
+        val appContext = requireContext().applicationContext
+        worker.execute {
+            val text = try {
+                appContext.contentResolver.openInputStream(uri)?.use { stream ->
+                    String(stream.readBytes(), Charsets.UTF_8)
+                }
+            } catch (_: IOException) {
+                null
+            } catch (_: RuntimeException) {
+                null
+            }
+            if (text.isNullOrBlank()) {
+                main.post { Toast.makeText(appContext, R.string.playlist_m3u_failed, Toast.LENGTH_SHORT).show() }
+                return@execute
+            }
+            val fallback = uri.lastPathSegment?.substringAfterLast('/')?.substringBeforeLast('.') ?: "Imported"
+            val decoded = M3uCodec.decode(text, fallback, repository.tracks)
+            main.post {
+                if (decoded.tracks.isEmpty()) {
+                    Toast.makeText(appContext, R.string.playlist_m3u_empty, Toast.LENGTH_LONG).show()
+                    return@post
+                }
+                val created = if (decoded.segments.size >= 2) {
+                    repository.playlists.createMix(decoded.name, decoded.segments)
+                } else {
+                    repository.playlists.create(decoded.name)?.also { pl ->
+                        repository.playlists.addTracks(pl.id, decoded.tracks.map { it.uri })
+                    }
+                }
+                if (created != null) {
+                    Toast.makeText(
+                        appContext,
+                        appContext.getString(R.string.playlist_m3u_imported, created.name, decoded.tracks.size),
+                        Toast.LENGTH_SHORT
+                    ).show()
+                    if (isAdded) navigator.openPlaylist(created.id)
+                }
+            }
         }
     }
 
@@ -303,6 +396,7 @@ class LibraryFragment : Fragment(R.layout.fragment_library), LibraryRepository.L
             TAB_FAVORITES -> favoritesTab
             TAB_PLAYLISTS -> playlistsTab
             TAB_ARTISTS -> artistsTab
+            TAB_ALBUMS -> albumsTab
             else -> songsTab
         }
     }
@@ -341,6 +435,11 @@ class LibraryFragment : Fragment(R.layout.fragment_library), LibraryRepository.L
                 renderCardHeader()
                 refreshArtists(gen, libVer, needle)
             }
+            TAB_ALBUMS -> {
+                if (albumAdapter.rows().isEmpty()) showSkeleton()
+                renderCardHeader()
+                refreshAlbums(gen, libVer, needle)
+            }
             TAB_PLAYLISTS -> {
                 if (playlistAdapter.rows().isEmpty()) showSkeleton()
                 renderCardHeader()
@@ -365,6 +464,10 @@ class LibraryFragment : Fragment(R.layout.fragment_library), LibraryRepository.L
             TAB_ARTISTS -> {
                 artistAdapter.setLoading(true)
                 if (list.adapter !== artistAdapter) list.adapter = artistAdapter
+            }
+            TAB_ALBUMS -> {
+                albumAdapter.setLoading(true)
+                if (list.adapter !== albumAdapter) list.adapter = albumAdapter
             }
             TAB_PLAYLISTS -> {
                 playlistAdapter.setLoading(true)
@@ -430,6 +533,33 @@ class LibraryFragment : Fragment(R.layout.fragment_library), LibraryRepository.L
         }
     }
 
+    private fun refreshAlbums(gen: Long, libVer: Long, needle: String) {
+        val albumSort = repository.settings.albumSort
+        val oldRows = if (list.adapter === albumAdapter && !albumAdapter.isLoading) albumAdapter.rows() else emptyList()
+        val canDiff = oldRows.isNotEmpty() && lastDiffLibVersion == libVer
+        worker.execute {
+            val source = repository.albums()
+            val matching = if (needle.isEmpty()) {
+                source
+            } else {
+                source.filter { album ->
+                    album.name.lowercase(Locale.ROOT).contains(needle) ||
+                        album.artist.lowercase(Locale.ROOT).contains(needle)
+                }
+            }
+            val sorted = AlbumSorter.sort(matching, albumSort)
+            val diff = if (canDiff && sorted.isNotEmpty()) AlbumAdapter.diff(oldRows, sorted) else null
+            main.post {
+                if (!isAdded || gen != refreshGeneration) return@post
+                initialBatchReady = true
+                lastDiffLibVersion = libVer
+                albumAdapter.submit(sorted, diff)
+                if (list.adapter !== albumAdapter) list.adapter = albumAdapter
+                onRowsReady(sorted.size)
+            }
+        }
+    }
+
     private fun refreshPlaylists(gen: Long, libVer: Long, needle: String) {
         val oldRows = if (list.adapter === playlistAdapter && !playlistAdapter.isLoading) playlistAdapter.rows() else emptyList()
         val canDiff = oldRows.isNotEmpty() && lastDiffLibVersion == libVer
@@ -464,6 +594,7 @@ class LibraryFragment : Fragment(R.layout.fragment_library), LibraryRepository.L
         styleTab(songsTab, activeTab == TAB_SONGS)
         styleTab(favoritesTab, activeTab == TAB_FAVORITES)
         styleTab(artistsTab, activeTab == TAB_ARTISTS)
+        styleTab(albumsTab, activeTab == TAB_ALBUMS)
         styleTab(playlistsTab, activeTab == TAB_PLAYLISTS)
         tabsStyled = true
     }
@@ -535,6 +666,7 @@ class LibraryFragment : Fragment(R.layout.fragment_library), LibraryRepository.L
                 showingSongs -> getString(TRACK_SORT_LABELS[repository.settings.trackSort])
                 showingPlaylists ->
                     resources.getQuantityString(R.plurals.library_playlist_count, shownPlaylistCount, shownPlaylistCount)
+                activeTab == TAB_ALBUMS -> getString(ALBUM_SORT_LABELS[repository.settings.albumSort])
                 else -> getString(ARTIST_SORT_LABELS[repository.settings.artistSort])
             }
         }
@@ -582,12 +714,14 @@ class LibraryFragment : Fragment(R.layout.fragment_library), LibraryRepository.L
         const val TAB_FAVORITES = 1
         const val TAB_ARTISTS = 2
         const val TAB_PLAYLISTS = 3
+        const val TAB_ALBUMS = 4
 
         const val ID_QUEUE = 1
         const val ID_RESCAN = 2
         const val ID_SETTINGS = 3
         const val ID_IMPORT = 4
         const val ID_MASHUP = 5
+        const val ID_IMPORT_M3U = 6
         const val TAB_SELECTED_SP = 28f
         const val TAB_IDLE_SP = 17f
         const val TAB_ANIMATION_MS = 220L
@@ -599,5 +733,8 @@ class LibraryFragment : Fragment(R.layout.fragment_library), LibraryRepository.L
 
         /** Indexed by the ArtistSorter modes. */
         val ARTIST_SORT_LABELS = intArrayOf(R.string.sort_artist_name, R.string.sort_artist_count)
+
+        /** Indexed by the AlbumSorter modes. */
+        val ALBUM_SORT_LABELS = intArrayOf(R.string.sort_artist_name, R.string.sort_artist, R.string.sort_artist_count)
     }
 }
