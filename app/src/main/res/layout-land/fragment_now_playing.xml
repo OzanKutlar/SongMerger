@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Landscape player: record on the left; title, actions and controls on the right -->
+<!-- Landscape player: record (or inline queue) on the left; title, actions and controls on the right -->
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
@@ -20,17 +20,227 @@
         <FrameLayout
             android:layout_width="0dp"
             android:layout_height="match_parent"
-            android:layout_weight="0.42">
+            android:layout_weight="0.46">
 
-            <me.Integer.Mediaplayer.ui.widgets.VinylDiscView
-                android:id="@+id/playerVinyl"
+            <FrameLayout
+                android:id="@+id/playerDiscStage"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent">
+
+                <me.Integer.Mediaplayer.ui.widgets.VinylDiscView
+                    android:id="@+id/playerVinyl"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:layout_gravity="center"
+                    android:layout_margin="20dp"
+                    android:clickable="true"
+                    android:contentDescription="@string/player_cover"
+                    android:focusable="true" />
+            </FrameLayout>
+
+            <!-- Inline queue view that replaces the vinyl disc in place -->
+            <LinearLayout
+                android:id="@+id/playerQueueStage"
                 android:layout_width="match_parent"
                 android:layout_height="match_parent"
-                android:layout_gravity="center"
-                android:layout_margin="20dp"
-                android:clickable="true"
-                android:contentDescription="@string/player_cover"
-                android:focusable="true" />
+                android:alpha="0"
+                android:orientation="vertical"
+                android:paddingTop="56dp"
+                android:visibility="gone">
+
+                <LinearLayout
+                    android:id="@+id/queueHeader"
+                    android:layout_width="match_parent"
+                    android:layout_height="44dp"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal"
+                    android:paddingStart="16dp"
+                    android:paddingEnd="8dp">
+
+                    <TextView
+                        android:id="@+id/queueSubtitle"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:singleLine="true"
+                        android:textColor="@color/text_secondary"
+                        android:textSize="14sp"
+                        android:textStyle="bold" />
+
+                    <FrameLayout
+                        android:id="@+id/queueSavePlaylist"
+                        android:layout_width="40dp"
+                        android:layout_height="40dp"
+                        android:background="@drawable/player_cell_bg"
+                        android:clickable="true"
+                        android:contentDescription="@string/queue_save_playlist"
+                        android:focusable="true">
+
+                        <ImageView
+                            android:layout_width="20dp"
+                            android:layout_height="20dp"
+                            android:layout_gravity="center"
+                            android:contentDescription="@null"
+                            android:src="@drawable/player_ic_add"
+                            android:tint="#ECEFF1" />
+                    </FrameLayout>
+
+                    <FrameLayout
+                        android:id="@+id/queueMore"
+                        android:layout_width="40dp"
+                        android:layout_height="40dp"
+                        android:background="@drawable/player_cell_bg"
+                        android:clickable="true"
+                        android:contentDescription="@string/queue_select"
+                        android:focusable="true">
+
+                        <ImageView
+                            android:layout_width="20dp"
+                            android:layout_height="20dp"
+                            android:layout_gravity="center"
+                            android:contentDescription="@null"
+                            android:src="@drawable/player_ic_select_all"
+                            android:tint="#ECEFF1" />
+                    </FrameLayout>
+                </LinearLayout>
+
+                <LinearLayout
+                    android:id="@+id/queueSelectionBar"
+                    android:layout_width="match_parent"
+                    android:layout_height="48dp"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal"
+                    android:paddingStart="4dp"
+                    android:paddingEnd="8dp"
+                    android:visibility="gone">
+
+                    <FrameLayout
+                        android:id="@+id/queueSelectionClose"
+                        android:layout_width="40dp"
+                        android:layout_height="40dp"
+                        android:background="@drawable/player_cell_bg"
+                        android:clickable="true"
+                        android:contentDescription="@string/queue_selection_close"
+                        android:focusable="true">
+
+                        <ImageView
+                            android:layout_width="20dp"
+                            android:layout_height="20dp"
+                            android:layout_gravity="center"
+                            android:contentDescription="@null"
+                            android:src="@drawable/player_ic_close"
+                            android:tint="#F5F5F7" />
+                    </FrameLayout>
+
+                    <TextView
+                        android:id="@+id/queueSelectionCount"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:singleLine="true"
+                        android:textColor="@color/text_primary"
+                        android:textSize="15sp"
+                        android:textStyle="bold" />
+
+                    <FrameLayout
+                        android:id="@+id/queueSelectAll"
+                        android:layout_width="40dp"
+                        android:layout_height="40dp"
+                        android:background="@drawable/player_cell_bg"
+                        android:clickable="true"
+                        android:contentDescription="@string/queue_select_all"
+                        android:focusable="true">
+
+                        <ImageView
+                            android:layout_width="20dp"
+                            android:layout_height="20dp"
+                            android:layout_gravity="center"
+                            android:contentDescription="@null"
+                            android:src="@drawable/player_ic_select_all"
+                            android:tint="#ECEFF1" />
+                    </FrameLayout>
+
+                    <FrameLayout
+                        android:id="@+id/queueSelectionPlaylist"
+                        android:layout_width="40dp"
+                        android:layout_height="40dp"
+                        android:background="@drawable/player_cell_bg"
+                        android:clickable="true"
+                        android:contentDescription="@string/menu_add_playlist"
+                        android:focusable="true">
+
+                        <ImageView
+                            android:layout_width="20dp"
+                            android:layout_height="20dp"
+                            android:layout_gravity="center"
+                            android:contentDescription="@null"
+                            android:src="@drawable/player_ic_add"
+                            android:tint="#ECEFF1" />
+                    </FrameLayout>
+
+                    <FrameLayout
+                        android:id="@+id/queueSelectionFavorite"
+                        android:layout_width="40dp"
+                        android:layout_height="40dp"
+                        android:background="@drawable/player_cell_bg"
+                        android:clickable="true"
+                        android:contentDescription="@string/menu_add_favorite"
+                        android:focusable="true">
+
+                        <ImageView
+                            android:id="@+id/queueSelectionFavoriteIcon"
+                            android:layout_width="20dp"
+                            android:layout_height="20dp"
+                            android:layout_gravity="center"
+                            android:contentDescription="@null"
+                            android:src="@drawable/player_ic_heart_outline" />
+                    </FrameLayout>
+
+                    <FrameLayout
+                        android:id="@+id/queueSelectionRemove"
+                        android:layout_width="40dp"
+                        android:layout_height="40dp"
+                        android:background="@drawable/player_cell_bg"
+                        android:clickable="true"
+                        android:contentDescription="@string/queue_remove"
+                        android:focusable="true">
+
+                        <ImageView
+                            android:layout_width="20dp"
+                            android:layout_height="20dp"
+                            android:layout_gravity="center"
+                            android:contentDescription="@null"
+                            android:src="@drawable/player_ic_delete"
+                            android:tint="#ECEFF1" />
+                    </FrameLayout>
+                </LinearLayout>
+
+                <FrameLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="0dp"
+                    android:layout_weight="1">
+
+                    <androidx.recyclerview.widget.RecyclerView
+                        android:id="@+id/queueList"
+                        android:layout_width="match_parent"
+                        android:layout_height="match_parent"
+                        android:clipToPadding="false"
+                        android:paddingTop="4dp"
+                        android:paddingBottom="8dp" />
+
+                    <TextView
+                        android:id="@+id/queueEmpty"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_gravity="center"
+                        android:gravity="center"
+                        android:padding="24dp"
+                        android:text="@string/queue_empty"
+                        android:textColor="@color/text_muted"
+                        android:textSize="15sp"
+                        android:visibility="gone" />
+                </FrameLayout>
+            </LinearLayout>
 
             <FrameLayout
                 android:id="@+id/playerClose"
@@ -55,7 +265,7 @@
         <LinearLayout
             android:layout_width="0dp"
             android:layout_height="match_parent"
-            android:layout_weight="0.58"
+            android:layout_weight="0.54"
             android:clipChildren="false"
             android:orientation="vertical">
 

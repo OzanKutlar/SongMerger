@@ -243,7 +243,12 @@ class MainActivity : AppCompatActivity(), PlayerHost, Navigator, NowPlayingListe
     }
 
     override fun openQueue() {
-        open(KEY_QUEUE, STYLE_SIDE) { QueueFragment() }
+        val current = supportFragmentManager.findFragmentById(R.id.mainContainer)
+        if (current is NowPlayingFragment) {
+            current.showInlineQueue()
+            return
+        }
+        open(KEY_PLAYER, STYLE_SHEET) { NowPlayingFragment.create(showQueue = true) }
     }
 
     override fun openSettings() {

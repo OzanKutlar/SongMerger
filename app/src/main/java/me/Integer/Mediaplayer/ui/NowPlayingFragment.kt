@@ -3,8 +3,10 @@ package me.Integer.Mediaplayer.ui
 import android.os.Bundle
 import android.view.View
 import android.widget.Toast
+import androidx.activity.OnBackPressedCallback
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.widget.PopupMenu
+import androidx.core.os.bundleOf
 import androidx.fragment.app.Fragment
 import me.Integer.Mediaplayer.R
 import me.Integer.Mediaplayer.library.ArtistSplitter
@@ -13,7 +15,7 @@ import me.Integer.Mediaplayer.library.Track
 
 /**
  * The full-screen player. Playback controls and animations live in [NowPlayingController];
- * the top bar's Queue and three-dot menu actions are handled here.
+ * the inline queue view that replaces the vinyl disc is managed by [NowPlayingQueueController].
  */
 class NowPlayingFragment : Fragment(R.layout.fragment_now_playing), PlayerHost.Listener, LibraryRepository.Listener {
 
@@ -21,6 +23,16 @@ class NowPlayingFragment : Fragment(R.layout.fragment_now_playing), PlayerHost.L
     private lateinit var host: PlayerHost
     private lateinit var navigator: Navigator
     private var controller: NowPlayingController? = null
+    private var queueController: NowPlayingQueueController? = null
+
+    private val backCallback = object : OnBackPressedCallback(false) {
+        override fun handleOnBackPressed() {
+            if (queueController?.handleBackPressed() != true) {
+                isEnabled = false
+                navigator.goBack()
+            }
+        }
+    }
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
@@ -28,12 +40,29 @@ class NowPlayingFragment : Fragment(R.layout.fragment_now_playing), PlayerHost.L
         host = requireActivity() as PlayerHost
         navigator = requireActivity() as Navigator
         controller = NowPlayingController(view, host, repository)
+        queueController = NowPlayingQueueController(view, host, repository) {
+            syncBackCallback()
+        }
+        requireActivity().onBackPressedDispatcher.addCallback(viewLifecycleOwner, backCallback)
+
+        val initialShowQueue = savedInstanceState?.getBoolean(KEY_SHOW_QUEUE)
+            ?: arguments?.getBoolean(ARG_SHOW_QUEUE, false)
+            ?: false
+        if (initialShowQueue) {
+            queueController?.setQueueVisible(true, animate = false)
+        }
+
         view.findViewById<View>(R.id.playerClose).setOnClickListener { navigator.goBack() }
-        view.findViewById<View>(R.id.playerQueue).setOnClickListener { navigator.openQueue() }
+        view.findViewById<View>(R.id.playerQueue).setOnClickListener { queueController?.toggleQueue() }
         view.findViewById<View>(R.id.playerMore).setOnClickListener { showMoreMenu(it) }
         view.findViewById<View>(R.id.playerAdd).setOnClickListener {
             currentTrack()?.let { PlaylistDialogs.addTrack(requireContext(), repository, it) }
         }
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        outState.putBoolean(KEY_SHOW_QUEUE, queueController?.isQueueVisible == true)
     }
 
     override fun onStart() {
@@ -41,10 +70,12 @@ class NowPlayingFragment : Fragment(R.layout.fragment_now_playing), PlayerHost.L
         repository.addListener(this)
         host.addPlayerListener(this)
         controller?.start()
+        queueController?.render()
     }
 
     override fun onStop() {
         controller?.stop()
+        queueController?.stop()
         host.removePlayerListener(this)
         repository.removeListener(this)
         super.onStop()
@@ -52,18 +83,30 @@ class NowPlayingFragment : Fragment(R.layout.fragment_now_playing), PlayerHost.L
 
     override fun onDestroyView() {
         controller = null
+        queueController = null
         super.onDestroyView()
     }
 
     override fun onPlayerChanged() {
         controller?.onPlayerChanged()
+        queueController?.onPlayerChanged()
     }
 
     override fun onLibraryChanged() {
         controller?.onPlayerChanged()
+        queueController?.onPlayerChanged()
     }
 
     override fun onScanState(state: LibraryRepository.ScanState) = Unit
+
+    fun showInlineQueue() {
+        queueController?.setQueueVisible(true, animate = true)
+    }
+
+    private fun syncBackCallback() {
+        val qc = queueController
+        backCallback.isEnabled = qc != null && (qc.isQueueVisible || qc.isSelectionActive)
+    }
 
     // ------------------------------------------------------------------ top-right menu
 
@@ -80,7 +123,7 @@ class NowPlayingFragment : Fragment(R.layout.fragment_now_playing), PlayerHost.L
             when (item.itemId) {
                 ID_VIEW_ALBUM -> openAlbumForCurrent()
                 ID_VIEW_ARTIST -> openArtistForCurrent()
-                ID_CURRENT_QUEUE -> navigator.openQueue()
+                ID_CURRENT_QUEUE -> queueController?.toggleQueue()
                 ID_SPLIT_ARTISTS -> currentTrack()?.let { SplitArtistsDialog.show(requireContext(), repository, it) }
                 ID_TRACK_DETAILS -> currentTrack()?.let { TrackDetailsDialog.show(requireContext(), repository, it) }
             }
@@ -136,11 +179,19 @@ class NowPlayingFragment : Fragment(R.layout.fragment_now_playing), PlayerHost.L
         )
     }
 
-    private companion object {
-        const val ID_VIEW_ALBUM = 1
-        const val ID_VIEW_ARTIST = 2
-        const val ID_CURRENT_QUEUE = 3
-        const val ID_SPLIT_ARTISTS = 4
-        const val ID_TRACK_DETAILS = 5
+    companion object {
+        private const val ARG_SHOW_QUEUE = "show_queue"
+        private const val KEY_SHOW_QUEUE = "state_show_queue"
+        private const val ID_VIEW_ALBUM = 1
+        private const val ID_VIEW_ARTIST = 2
+        private const val ID_CURRENT_QUEUE = 3
+        private const val ID_SPLIT_ARTISTS = 4
+        private const val ID_TRACK_DETAILS = 5
+
+        fun create(showQueue: Boolean = false): NowPlayingFragment {
+            return NowPlayingFragment().apply {
+                if (showQueue) arguments = bundleOf(ARG_SHOW_QUEUE to true)
+            }
+        }
     }
 }
