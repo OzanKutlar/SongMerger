@@ -3,6 +3,7 @@ package me.Integer.Mediaplayer.library
 /**
  * One step of a mashup: play [trackUri] from [startMs] up to [endMs], then blend into the
  * next step over [crossfadeMs]. An [endMs] of [END_OF_TRACK] plays the song to its end.
+ * [gainDb] turns a loud song down so the whole mix keeps one level; it is never above 0.
  * Build instances with [create], which rejects impossible values.
  */
 data class MixSegment(
@@ -10,7 +11,8 @@ data class MixSegment(
     val startMs: Long,
     val endMs: Long,
     val crossfadeMs: Long,
-    val tempoRatio: Float = 1f
+    val tempoRatio: Float = 1f,
+    val gainDb: Float = 0f
 ) {
 
     val playsToEnd: Boolean
@@ -22,6 +24,8 @@ data class MixSegment(
         const val MAX_CROSSFADE_MS = 15000L
         const val MIN_TEMPO_RATIO = 0.85f
         const val MAX_TEMPO_RATIO = 1.15f
+        const val MIN_GAIN_DB = -12f
+        const val MAX_GAIN_DB = 0f
 
         /** A step shorter than this is not worth playing. */
         const val MIN_LENGTH_MS = 1000L
@@ -40,7 +44,8 @@ data class MixSegment(
             endMs: Long,
             crossfadeMs: Long,
             durationMs: Long = 0L,
-            tempoRatio: Float = 1f
+            tempoRatio: Float = 1f,
+            gainDb: Float = 0f
         ): MixSegment? {
             if (trackUri.isEmpty()) return null
             if (startMs < 0L || startMs > MAX_POSITION_MS) return null
@@ -57,8 +62,13 @@ data class MixSegment(
                 startMs = startMs,
                 endMs = end,
                 crossfadeMs = crossfadeMs.coerceIn(0L, MAX_CROSSFADE_MS),
-                tempoRatio = cleanTempo
+                tempoRatio = cleanTempo,
+                gainDb = cleanGain(gainDb)
             )
+        }
+
+        private fun cleanGain(gainDb: Float): Float {
+            return if (gainDb.isFinite()) gainDb.coerceIn(MIN_GAIN_DB, MAX_GAIN_DB) else 0f
         }
 
         private fun cleanEnd(endMs: Long, durationMs: Long): Long {

@@ -30,7 +30,6 @@ import me.Integer.Mediaplayer.ui.NowPlayingFragment
 import me.Integer.Mediaplayer.ui.PlayerExpand
 import me.Integer.Mediaplayer.ui.PlayerHost
 import me.Integer.Mediaplayer.ui.PlaylistFragment
-import me.Integer.Mediaplayer.ui.QueueFragment
 import me.Integer.Mediaplayer.ui.SettingsFragment
 import me.Integer.Mediaplayer.ui.SongLaunch
 import kotlin.math.roundToInt
@@ -70,7 +69,7 @@ class MainActivity : AppCompatActivity(), PlayerHost, Navigator, NowPlayingListe
     private val screenWatcher = object : FragmentManager.FragmentLifecycleCallbacks() {
         override fun onFragmentResumed(fm: FragmentManager, f: Fragment) {
             if (f.id != R.id.mainContainer) return
-            val hide = f is NowPlayingFragment || f is SettingsFragment || f is QueueFragment
+            val hide = f is NowPlayingFragment || f is SettingsFragment
             miniBar.setSuppressed(hide)
         }
     }
@@ -82,7 +81,7 @@ class MainActivity : AppCompatActivity(), PlayerHost, Navigator, NowPlayingListe
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
         repository = LibraryRepository.get(this)
-        connection = PlayerConnection(this, this)
+        connection = PlayerConnection(this, this) { repository.settings.crossfadeMs }
         artLoader = CoverArtLoader(this, (ART_SIZE_DP * resources.displayMetrics.density).roundToInt())
         miniBar = MiniPlayerBar(findViewById(R.id.miniBar), this, this)
         val launchLayer = findViewById<FrameLayout>(R.id.launchLayer)
@@ -311,7 +310,6 @@ class MainActivity : AppCompatActivity(), PlayerHost, Navigator, NowPlayingListe
 
         // Back stack names: one entry per screen, so a screen is never stacked twice.
         private const val KEY_PLAYER = "player"
-        private const val KEY_QUEUE = "queue"
         private const val KEY_SETTINGS = "settings"
         private const val KEY_ARTIST = "artist:"
         private const val KEY_ALBUM = "album:"

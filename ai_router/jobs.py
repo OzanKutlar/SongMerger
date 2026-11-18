@@ -13,7 +13,7 @@ from typing import Any, BinaryIO
 
 import numpy as np
 
-from audio_analyzer import HOP_LENGTH, SAMPLE_RATE, FeatureCache, analyze_decoded, decode_audio
+from audio_analyzer import HOP_LENGTH, SAMPLE_RATE, FeatureCache, analyze_decoded, decode_audio_with_peak
 
 MAX_UPLOAD_BYTES = 80 * 1024 * 1024
 READ_CHUNK_BYTES = 65536
@@ -105,7 +105,7 @@ class UploadInbox:
                     print(f"[ai_router] cannot delete {path.name}: {exc}")
 
     def purge_stale(self) -> int:
-        """Deletes uploads that were never analysed, older than a day."""
+        """Deletes uploads older than STALE_INBOX_SEC (30 days)."""
         cutoff = time.time() - STALE_INBOX_SEC
         removed = 0
         for path in list(self.inbox_dir.iterdir())[:MAX_INBOX_FILES]:
@@ -250,7 +250,7 @@ class JobRunner:
                 return
             item = queue.pop(0)
             try:
-                in_flight[pool.submit(decode_audio, item.audio_path)] = item
+                in_flight[pool.submit(decode_audio_with_peak, item.audio_path)] = item
             except RuntimeError as exc:  # includes BrokenProcessPool
                 print(f"[ai_router] decode pool unavailable, decoding here: {exc}")
                 in_flight[self._decode_here(item.audio_path)] = item
@@ -259,7 +259,7 @@ class JobRunner:
     def _decode_here(path: Path) -> Future:
         future: Future = Future()
         try:
-            future.set_result(decode_audio(path))
+            future.set_result(decode_audio_with_peak(path))
         except Exception as exc:  # noqa: BLE001 - reported with the song
             future.set_exception(exc)
         return future
@@ -269,10 +269,10 @@ class JobRunner:
         title = str(item.meta.get("title") or item.track_id)
         try:
             try:
-                y = future.result()
+                y, peak = future.result()
             except BrokenProcessPool:
-                y = decode_audio(item.audio_path)
-            self.cache.put(self._profile(y, item, title))
+                y, peak = decode_audio_with_peak(item.audio_path)
+            self.cache.put(self._profile(y, peak, item, title))
             ok = True
         except Exception as exc:  # noqa: BLE001 - one bad song must not stop the job
             print(f"[ai_router] cannot analyse {title}: {exc}")
@@ -282,16 +282,16 @@ class JobRunner:
         status = job.snapshot()
         print(f"[ai_router] {status['done']}/{status['total']} {'ok  ' if ok else 'FAIL'} {title}")
 
-    def _profile(self, y: np.ndarray, item: InboxItem, title: str) -> dict[str, Any]:
+    def _profile(self, y: np.ndarray, peak: float, item: InboxItem, title: str) -> dict[str, Any]:
         meta = item.meta
         args = (item.track_id, title, str(meta.get("artist") or ""), str(meta.get("fingerprint") or ""))
         extractor = self._get_extractor()
         if extractor is not None:
             try:
-                return analyze_decoded(y, *args, extractor=extractor)
+                return analyze_decoded(y, *args, extractor=extractor, peak=peak)
             except RuntimeError as exc:  # CUDA out of memory and similar
                 print(f"[ai_router] GPU analysis failed for {title}, using the CPU: {exc}")
-        return analyze_decoded(y, *args, extractor=None)
+        return analyze_decoded(y, *args, extractor=None, peak=peak)
 
     def _get_extractor(self) -> Any:
         if not self.device or self._extractor_failed:

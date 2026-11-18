@@ -170,14 +170,13 @@
         <item quantity="other">Saved %1$d mashup playlists</item>
     </plurals>
     <string name="mashup_save_failed">Could not save the mashup</string>
+    <string name="mashup_channel">AI mashup jobs</string>
 
     <!-- Queue -->
-    <string name="queue_title">Current queue</string>
     <string name="queue_position">Playing %1$d of %2$d</string>
     <string name="queue_empty">The queue is empty</string>
     <string name="queue_drag">Drag to reorder</string>
     <string name="queue_remove">Remove from queue</string>
-    <string name="queue_more">Queue options</string>
     <string name="queue_save_playlist">Save queue as playlist</string>
     <string name="queue_select">Select songs</string>
     <string name="queue_select_all">Select all</string>
@@ -230,7 +229,8 @@
     <string name="settings_apply">Apply</string>
     <string name="settings_saved">Separator saved</string>
     <string name="settings_ai_title">AI MASHUP SERVER</string>
-    <string name="settings_ai_help">The address of the computer running ai_router/server.py, for example http://192.168.1.50:8765. The phone must be able to reach it over the network.</string>
+    <string name="settings_ai_help">The address of the computer running ai_router/server.py, for example http://192.168.1.50:8765. The phone must be able to reach it over the network. If the server was started with --token, enter the same token below.</string>
+    <string name="settings_ai_token_hint">Server token (optional)</string>
     <string name="settings_ai_save">Save</string>
     <string name="settings_ai_test">Test</string>
     <string name="settings_ai_saved">Server address saved</string>
@@ -241,4 +241,9 @@
     <string name="settings_ai_failed">Cannot use the server: %1$s</string>
     <string name="settings_sample_tag">Artist One, Artist Two</string>
     <string name="settings_preview">%1$s\n&#8594;  %2$s</string>
+    <string name="settings_crossfade_title">PLAYBACK</string>
+    <string name="settings_crossfade_help">Blend each song into the next one. Applies to songs queued from now on. AI mashups always use their own transitions.</string>
+    <string name="settings_crossfade_label">Crossfade: %1$s</string>
+    <string name="settings_crossfade_off">Off</string>
+    <string name="settings_crossfade_seconds">%1$d s</string>
 </resources>

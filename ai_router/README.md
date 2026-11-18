@@ -29,6 +29,7 @@ The startup line shows the analysis device, for example `device=cuda:0 NVIDIA Ge
 
 - `--device auto|cuda|cpu`: `auto` (the default) uses the GPU when PyTorch can see one; `cuda` refuses to start without it.
 - `--workers N`: processes that decode songs in parallel (default: CPU cores minus one, at most 8).
+- `--token SECRET` (or the `AI_ROUTER_TOKEN` environment variable): every request must then carry it in an `X-Auth-Token` header. Enter the same token in the app under Settings, AI mashup server. Strongly recommended with `--host 0.0.0.0`.
 - Allow Python through Windows Firewall on private networks, otherwise the phone cannot connect.
 
 ## How a run works
@@ -46,7 +47,7 @@ python server.py --self-test
 ## Endpoints
 
 - `GET /api/v1/health` — Server status, cached track count and analysis device.
-- `POST /api/v1/check-cache` — Given `{ "tracks": [{"id", "fingerprint"}] }`, returns which track IDs still need uploading.
+- `POST /api/v1/check-cache` — Given `{ "tracks": [{"id", "fingerprint"}] }`, answers at once with `missing_ids` (not analysed yet) and `stored_ids` (audio already on the server: analyse it, no upload needed). `missing_ids` also contains the stored IDs, for older clients.
 - `POST /api/v1/upload-track` — Stores a raw audio upload for the next analysis job and answers at once. Sent with `X-Track-Id`, `X-Track-Title`, `X-Track-Artist`, `X-Track-Fingerprint`, `X-Track-Filename` headers. The title, artist and filename values are URL-encoded (UTF-8) and decoded by the server.
 - `POST /api/v1/analyze` — Given `{ "track_ids": [...] }`, starts a background analysis job for the stored uploads and returns its `job_id`.
 - `GET /api/v1/jobs/<job_id>` — Job phase (`queued`, `analysing`, `done`, `failed`) and progress (`done`, `total`, `failed`).

@@ -9,43 +9,54 @@ import org.json.JSONObject
 import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
+import java.util.concurrent.Executors
+import java.util.concurrent.RejectedExecutionException
 
 /**
  * The user's playlists, kept in one small JSON file inside the app. Playlists hold song
- * URIs, so they survive rescans. Main thread only; [onChanged] runs after every change.
+ * URIs, so they survive rescans.
+ *
+ * Every read and change goes through one lock, so the worker that preloads and filters
+ * playlists never sees a half-made change. Changes are written to disk as snapshots on a
+ * background thread, in order. [onChanged] runs on the calling thread, outside the lock.
  */
 class PlaylistStore(context: Context, private val onChanged: () -> Unit) {
 
     private val file = AtomicFile(File(context.applicationContext.filesDir, FILE_NAME))
+    private val lock = Any()
+    private val writer = Executors.newSingleThreadExecutor { task -> Thread(task, "Mediaplayer-Playlists") }
     private var loaded: MutableList<Playlist>? = null
 
     /** Warms the in-memory playlist cache off the main thread. */
-    @Synchronized
     fun preload() {
-        items()
+        synchronized(lock) { items() }
     }
 
     /** Every playlist, sorted by name. */
-    @Synchronized
     fun all(): List<Playlist> {
-        return items().sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER) { it.name })
+        return synchronized(lock) { items().sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER) { it.name }) }
     }
 
-    @Synchronized
     fun get(id: Long): Playlist? {
-        return items().firstOrNull { it.id == id }
+        return synchronized(lock) { items().firstOrNull { it.id == id } }
     }
 
     /** @return null when the name is blank or there are too many playlists */
     fun create(rawName: String?): Playlist? {
         val name = Playlist.cleanName(rawName)
-        val items = items()
-        if (name.isEmpty() || items.size >= MAX_PLAYLISTS) return null
-        val id = (items.maxOfOrNull { it.id } ?: 0L) + 1L
-        val playlist = Playlist(id, name, emptyList())
-        items.add(playlist)
-        commit()
-        return playlist
+        if (name.isEmpty()) return null
+        var created: Playlist? = null
+        mutate { items ->
+            if (items.size >= MAX_PLAYLISTS) {
+                false
+            } else {
+                val playlist = Playlist(nextId(items), name, emptyList())
+                items.add(playlist)
+                created = playlist
+                true
+            }
+        }
+        return created
     }
 
     /**
@@ -56,15 +67,21 @@ class PlaylistStore(context: Context, private val onChanged: () -> Unit) {
      */
     fun createMix(rawName: String?, segments: List<MixSegment>): Playlist? {
         val name = Playlist.cleanName(rawName)
-        val items = items()
         val steps = segments.filter { it.trackUri.isNotEmpty() }.take(MAX_SEGMENTS)
-        if (name.isEmpty() || steps.size < MIN_MIX_STEPS || items.size >= MAX_PLAYLISTS) return null
-        val id = (items.maxOfOrNull { it.id } ?: 0L) + 1L
+        if (name.isEmpty() || steps.size < MIN_MIX_STEPS) return null
         val uris = steps.map { it.trackUri }.distinct().take(MAX_TRACKS)
-        val playlist = Playlist(id, name, uris, segments = steps)
-        items.add(playlist)
-        commit()
-        return playlist
+        var created: Playlist? = null
+        mutate { items ->
+            if (items.size >= MAX_PLAYLISTS) {
+                false
+            } else {
+                val playlist = Playlist(nextId(items), name, uris, segments = steps)
+                items.add(playlist)
+                created = playlist
+                true
+            }
+        }
+        return created
     }
 
     fun rename(id: Long, rawName: String?): Boolean {
@@ -74,39 +91,42 @@ class PlaylistStore(context: Context, private val onChanged: () -> Unit) {
     }
 
     fun delete(id: Long) {
-        val items = items()
-        val index = items.indexOfFirst { it.id == id }
-        if (index < 0) return
-        discardImage(items.removeAt(index), "")
-        commit()
+        mutate { items ->
+            val index = items.indexOfFirst { it.id == id }
+            if (index < 0) {
+                false
+            } else {
+                discardImage(items.removeAt(index), "")
+                true
+            }
+        }
     }
 
     /** @return false when the song is already in the playlist or the playlist is full */
     fun addTrack(id: Long, trackUri: String): Boolean {
-        val playlist = get(id) ?: return false
-        if (trackUri.isEmpty() || trackUri in playlist.trackUris) return false
-        if (playlist.trackUris.size >= MAX_TRACKS) return false
-        return update(id) {
-            it.copy(trackUris = it.trackUris + trackUri, segments = extended(it, listOf(trackUri)))
+        if (trackUri.isEmpty()) return false
+        return update(id) { old ->
+            if (trackUri in old.trackUris || old.trackUris.size >= MAX_TRACKS) {
+                null
+            } else {
+                old.copy(trackUris = old.trackUris + trackUri, segments = extended(old, listOf(trackUri)))
+            }
         }
     }
 
     /** Appends [trackUris] not yet in the playlist in one write; returns how many were added. */
     fun addTracks(id: Long, trackUris: List<String>): Int {
-        val playlist = get(id) ?: return 0
-        val existing = playlist.trackUris.toHashSet()
-        val room = (MAX_TRACKS - playlist.trackUris.size).coerceAtLeast(0)
-        if (room == 0) return 0
-        val additions = ArrayList<String>()
-        for (uri in trackUris) {
-            if (uri.isNotEmpty() && existing.add(uri)) {
-                additions.add(uri)
-                if (additions.size >= room) break
+        var added = 0
+        update(id) { old ->
+            val additions = newUris(old, trackUris)
+            added = additions.size
+            if (additions.isEmpty()) {
+                null
+            } else {
+                old.copy(trackUris = old.trackUris + additions, segments = extended(old, additions))
             }
         }
-        if (additions.isEmpty()) return 0
-        update(id) { it.copy(trackUris = it.trackUris + additions, segments = extended(it, additions)) }
-        return additions.size
+        return added
     }
 
     /** Removing the song whose cover the playlist uses puts the cover back on automatic. */
@@ -124,16 +144,19 @@ class PlaylistStore(context: Context, private val onChanged: () -> Unit) {
 
     /**
      * Stores a new song order. Songs missing from [ordered] (for example files that are
-     * currently not in the library) keep their place at the end.
+     * currently not in the library) keep their place at the end. A mashup keeps the order
+     * its transitions were chosen for.
      */
     fun reorder(id: Long, ordered: List<String>) {
-        // The steps of a mashup were chosen for this order, so it is not rearranged.
-        if (get(id)?.isMix == true) return
         update(id) { old ->
-            val known = old.trackUris.toSet()
-            val kept = ordered.filter { it in known }.distinct()
-            val keptSet = kept.toSet()
-            old.copy(trackUris = kept + old.trackUris.filter { it !in keptSet })
+            if (old.isMix) {
+                null
+            } else {
+                val known = old.trackUris.toSet()
+                val kept = ordered.filter { it in known }.distinct()
+                val keptSet = kept.toSet()
+                old.copy(trackUris = kept + old.trackUris.filter { it !in keptSet })
+            }
         }
     }
 
@@ -146,15 +169,71 @@ class PlaylistStore(context: Context, private val onChanged: () -> Unit) {
         }
     }
 
-    // ------------------------------------------------------------------ helpers
+    // ------------------------------------------------------------------ changes
 
-    private fun update(id: Long, change: (Playlist) -> Playlist): Boolean {
-        val items = items()
-        val index = items.indexOfFirst { it.id == id }
-        if (index < 0) return false
-        items[index] = change(items[index])
-        commit()
+    /** Replaces one playlist; [change] returns null to leave it as it is. */
+    private fun update(id: Long, change: (Playlist) -> Playlist?): Boolean {
+        return mutate { items ->
+            val index = items.indexOfFirst { it.id == id }
+            val next = if (index < 0) null else change(items[index])
+            if (next == null) {
+                false
+            } else {
+                items[index] = next
+                true
+            }
+        }
+    }
+
+    /**
+     * Runs [change] under the lock; when it reports a change, the new list is written in the
+     * background and listeners are told, outside the lock.
+     */
+    private fun mutate(change: (MutableList<Playlist>) -> Boolean): Boolean {
+        val snapshot: List<Playlist> = synchronized(lock) {
+            val items = items()
+            if (!change(items)) return false
+            ArrayList(items)
+        }
+        scheduleWrite(snapshot)
+        onChanged()
         return true
+    }
+
+    private fun scheduleWrite(snapshot: List<Playlist>) {
+        try {
+            writer.execute { write(snapshot) }
+        } catch (e: RejectedExecutionException) {
+            Log.w(TAG, "playlist writer unavailable, saving here: ${e.message}")
+            write(snapshot)
+        }
+    }
+
+    /** Must be called with [lock] held. */
+    private fun items(): MutableList<Playlist> {
+        loaded?.let { return it }
+        val read = read()
+        loaded = read
+        return read
+    }
+
+    private fun nextId(items: List<Playlist>): Long {
+        return (items.maxOfOrNull { it.id } ?: 0L) + 1L
+    }
+
+    /** [candidates] not yet in [playlist], in order and within the room left. */
+    private fun newUris(playlist: Playlist, candidates: List<String>): List<String> {
+        val existing = playlist.trackUris.toHashSet()
+        val room = (MAX_TRACKS - playlist.trackUris.size).coerceAtLeast(0)
+        val additions = ArrayList<String>()
+        if (room == 0) return additions
+        for (uri in candidates) {
+            if (uri.isNotEmpty() && existing.add(uri)) {
+                additions.add(uri)
+                if (additions.size >= room) break
+            }
+        }
+        return additions
     }
 
     /** Deletes the imported cover image of [playlist], unless it is the one to [keep]. */
@@ -164,15 +243,19 @@ class PlaylistStore(context: Context, private val onChanged: () -> Unit) {
         if (!File(playlist.coverRef).delete()) Log.w(TAG, "cannot delete old cover ${playlist.coverRef}")
     }
 
-    private fun commit() {
-        write(items())
-        onChanged()
+    /** A mashup gains each new song as a whole-song step; a plain playlist has no steps. */
+    private fun extended(playlist: Playlist, uris: List<String>): List<MixSegment> {
+        if (!playlist.isMix) return emptyList()
+        val added = uris.map {
+            MixSegment(it, 0L, MixSegment.END_OF_TRACK, MixSegment.DEFAULT_CROSSFADE_MS)
+        }
+        return (playlist.segments + added).take(MAX_SEGMENTS)
     }
-    @Synchronized
-    private fun items(): MutableList<Playlist> {        loaded?.let { return it }
-        val read = read()
-        loaded = read
-        return read
+
+    /** The steps without one song; with fewer than two left the playlist becomes a plain one. */
+    private fun without(segments: List<MixSegment>, trackUri: String): List<MixSegment> {
+        val kept = segments.filter { it.trackUri != trackUri }
+        return if (kept.size >= MIN_MIX_STEPS) kept else emptyList()
     }
 
     // ------------------------------------------------------------------ file
@@ -226,7 +309,8 @@ class PlaylistStore(context: Context, private val onChanged: () -> Unit) {
                 startMs = item.optLong("s", 0L),
                 endMs = item.optLong("e", MixSegment.END_OF_TRACK),
                 crossfadeMs = item.optLong("x", MixSegment.DEFAULT_CROSSFADE_MS),
-                tempoRatio = item.optDouble("t", 1.0).toFloat()
+                tempoRatio = item.optDouble("t", 1.0).toFloat(),
+                gainDb = item.optDouble("g", 0.0).toFloat()
             )
             if (segment != null) segments.add(segment)
         }
@@ -243,26 +327,13 @@ class PlaylistStore(context: Context, private val onChanged: () -> Unit) {
                     .put("e", segment.endMs)
                     .put("x", segment.crossfadeMs)
                     .put("t", segment.tempoRatio.toDouble())
+                    .put("g", segment.gainDb.toDouble())
             )
         }
         return array
     }
 
-    /** A mashup gains each new song as a whole-song step; a plain playlist has no steps. */
-    private fun extended(playlist: Playlist, uris: List<String>): List<MixSegment> {
-        if (!playlist.isMix) return emptyList()
-        val added = uris.map {
-            MixSegment(it, 0L, MixSegment.END_OF_TRACK, MixSegment.DEFAULT_CROSSFADE_MS)
-        }
-        return (playlist.segments + added).take(MAX_SEGMENTS)
-    }
-
-    /** The steps without one song; with fewer than two left the playlist becomes a plain one. */
-    private fun without(segments: List<MixSegment>, trackUri: String): List<MixSegment> {
-        val kept = segments.filter { it.trackUri != trackUri }
-        return if (kept.size >= MIN_MIX_STEPS) kept else emptyList()
-    }
-
+    /** Writer thread (or the caller when the writer is gone). */
     private fun write(playlists: List<Playlist>) {
         var stream: FileOutputStream? = null
         try {

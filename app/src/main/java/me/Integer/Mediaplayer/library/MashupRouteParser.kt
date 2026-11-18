@@ -20,7 +20,8 @@ object MashupRouteParser {
         val startMs: Long,
         val endMs: Long,
         val crossfadeMs: Long,
-        val tempoRatio: Float = 1f
+        val tempoRatio: Float = 1f,
+        val gainDb: Float = 0f
     )
 
     const val MAX_ROUTE_CHARS = 20000
@@ -133,7 +134,8 @@ object MashupRouteParser {
                 endMs = endMs,
                 crossfadeMs = step.crossfadeMs,
                 durationMs = track.durationMs,
-                tempoRatio = step.tempoRatio
+                tempoRatio = step.tempoRatio,
+                gainDb = step.gainDb
             ) ?: return null
             segments.add(segment)
         }

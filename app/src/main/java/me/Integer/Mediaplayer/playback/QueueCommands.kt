@@ -3,6 +3,7 @@ package me.Integer.Mediaplayer.playback
 import android.os.Bundle
 import androidx.media3.common.MediaItem
 import androidx.media3.session.SessionCommand
+import kotlin.math.pow
 
 /**
  * The private commands between [PlayerConnection] and [PlaybackService] that keep the
@@ -40,6 +41,12 @@ internal object QueueCommands {
     /** Key of a mashup step's initial tempo ratio during a beat-matched blend. */
     const val EXTRA_TEMPO_RATIO = "mix_tempo_ratio"
 
+    /** Key of a mashup step's loudness correction in dB (0 or below) in the metadata extras. */
+    const val EXTRA_GAIN_DB = "mix_gain_db"
+
+    /** The deepest loudness correction; the same limit as MixSegment.MIN_GAIN_DB. */
+    const val MIN_GAIN_DB = -12f
+
     /** The longest crossfade the player performs; the same limit as MixSegment.MAX_CROSSFADE_MS. */
     const val MAX_CROSSFADE_MS = 15000L
 
@@ -63,5 +70,18 @@ internal object QueueCommands {
     fun tempoRatioOf(item: MediaItem): Float {
         val value = item.mediaMetadata.extras?.getFloat(EXTRA_TEMPO_RATIO, 1f) ?: 1f
         return if (value.isFinite()) value.coerceIn(0.85f, 1.15f) else 1f
+    }
+
+    /** The loudness correction of [item] in dB; 0 for a normal song. */
+    fun gainDbOf(item: MediaItem): Float {
+        val value = item.mediaMetadata.extras?.getFloat(EXTRA_GAIN_DB, 0f) ?: 0f
+        return if (value.isFinite()) value.coerceIn(MIN_GAIN_DB, 0f) else 0f
+    }
+
+    /** The loudness correction of [item] as a volume factor in 0..1; 1 for none. */
+    fun gainOf(item: MediaItem?): Float {
+        if (item == null) return 1f
+        val db = gainDbOf(item)
+        return if (db == 0f) 1f else 10.0.pow(db / 20.0).toFloat()
     }
 }

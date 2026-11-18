@@ -8,6 +8,7 @@ import android.view.LayoutInflater
 import android.view.View
 import android.widget.EditText
 import android.widget.LinearLayout
+import android.widget.SeekBar
 import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
@@ -22,7 +23,7 @@ import me.Integer.Mediaplayer.library.PlayerSettings
 import java.io.IOException
 import java.util.concurrent.Executors
 
-/** Music folders and the artist separator. */
+/** Music folders, the artist separator, crossfade, and the AI mashup server. */
 class SettingsFragment : Fragment(R.layout.fragment_settings), LibraryRepository.Listener {
 
     private lateinit var repository: LibraryRepository
@@ -33,6 +34,9 @@ class SettingsFragment : Fragment(R.layout.fragment_settings), LibraryRepository
     private lateinit var previewView: TextView
     private lateinit var aiServerInput: EditText
     private lateinit var aiStatusView: TextView
+    private lateinit var aiTokenInput: EditText
+    private lateinit var crossfadeBar: SeekBar
+    private lateinit var crossfadeLabel: TextView
     private val main = Handler(Looper.getMainLooper())
     private val worker = Executors.newSingleThreadExecutor { task ->
         Thread(task, "Mediaplayer-AiServerTest").apply { isDaemon = true }
@@ -59,6 +63,7 @@ class SettingsFragment : Fragment(R.layout.fragment_settings), LibraryRepository
         if (savedInstanceState == null) separatorInput.setText(repository.settings.artistSeparator)
         separatorInput.doAfterTextChanged { renderPreview() }
         wireAiServer(view, savedInstanceState)
+        wireCrossfade(view)
     }
 
     override fun onStart() {
@@ -139,7 +144,11 @@ class SettingsFragment : Fragment(R.layout.fragment_settings), LibraryRepository
     private fun wireAiServer(view: View, savedInstanceState: Bundle?) {
         aiServerInput = view.findViewById(R.id.settingsAiServer)
         aiStatusView = view.findViewById(R.id.settingsAiStatus)
-        if (savedInstanceState == null) aiServerInput.setText(repository.settings.aiServerUrl)
+        aiTokenInput = view.findViewById(R.id.settingsAiToken)
+        if (savedInstanceState == null) {
+            aiServerInput.setText(repository.settings.aiServerUrl)
+            aiTokenInput.setText(repository.settings.aiServerToken)
+        }
         view.findViewById<View>(R.id.settingsAiSave).setOnClickListener { saveAiServer() }
         view.findViewById<View>(R.id.settingsAiTest).setOnClickListener { testAiServer() }
     }
@@ -154,6 +163,8 @@ class SettingsFragment : Fragment(R.layout.fragment_settings), LibraryRepository
         }
         repository.settings.aiServerUrl = clean
         aiServerInput.setText(clean)
+        repository.settings.aiServerToken = aiTokenInput.text?.toString().orEmpty()
+        aiTokenInput.setText(repository.settings.aiServerToken)
         val message = if (clean.isEmpty()) R.string.settings_ai_cleared else R.string.settings_ai_saved
         Toast.makeText(requireContext(), message, Toast.LENGTH_SHORT).show()
     }
@@ -167,7 +178,8 @@ class SettingsFragment : Fragment(R.layout.fragment_settings), LibraryRepository
         }
         val run = ++testGeneration
         aiStatusView.setText(R.string.settings_ai_testing)
-        val client = AiMashupClient(requireContext(), url)
+        val token = PlayerSettings.sanitiseToken(aiTokenInput.text?.toString())
+        val client = AiMashupClient(requireContext(), url, token)
         worker.execute {
             val outcome = pingServer(client)
             main.post { showTestOutcome(run, outcome) }
@@ -193,6 +205,35 @@ class SettingsFragment : Fragment(R.layout.fragment_settings), LibraryRepository
         } else {
             getString(R.string.settings_ai_failed, reason)
         }
+    }
+
+    // ------------------------------------------------------------------ crossfade
+
+    private fun wireCrossfade(view: View) {
+        crossfadeBar = view.findViewById(R.id.settingsCrossfade)
+        crossfadeLabel = view.findViewById(R.id.settingsCrossfadeValue)
+        crossfadeBar.max = PlayerSettings.MAX_CROSSFADE_SECONDS
+        crossfadeBar.progress = repository.settings.crossfadeSeconds
+        renderCrossfade(crossfadeBar.progress)
+        crossfadeBar.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(bar: SeekBar?, progress: Int, fromUser: Boolean) {
+                renderCrossfade(progress)
+                if (fromUser) repository.settings.crossfadeSeconds = progress
+            }
+
+            override fun onStartTrackingTouch(bar: SeekBar?) = Unit
+
+            override fun onStopTrackingTouch(bar: SeekBar?) = Unit
+        })
+    }
+
+    private fun renderCrossfade(seconds: Int) {
+        val value = if (seconds <= 0) {
+            getString(R.string.settings_crossfade_off)
+        } else {
+            getString(R.string.settings_crossfade_seconds, seconds)
+        }
+        crossfadeLabel.text = getString(R.string.settings_crossfade_label, value)
     }
 
     // ------------------------------------------------------------------ separator

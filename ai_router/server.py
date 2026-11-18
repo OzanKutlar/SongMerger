@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import hmac
 import json
 import os
 import tempfile
@@ -15,32 +16,56 @@ from urllib.parse import unquote_plus
 import numpy as np
 
 from audio_analyzer import FeatureCache
-from jobs import JobRunner, UploadInbox
+from jobs import MAX_JOB_TRACKS, JobRunner, UploadInbox
 from router_engine import CueTable, generate_mashup_playlists, score_transition
 
 MAX_UPLOAD_BYTES = 80 * 1024 * 1024
+MAX_JSON_BYTES = 4 * 1024 * 1024
 DEFAULT_CACHE_DIR = Path(__file__).resolve().parent / "cache"
 JOBS_PREFIX = "/api/v1/jobs/"
 MAX_WORKERS = 8
 SELF_TEST_POLLS = 2400
+TOKEN_HEADER = "X-Auth-Token"
+TOKEN_ENV = "AI_ROUTER_TOKEN"
+LOCAL_HOSTS = ("127.0.0.1", "localhost", "::1")
+MAX_PLAYLISTS = 20
+MAX_TRACKS_PER_PLAYLIST = 50
+MATRIX_TOLERANCE = 1e-3
 
 
 def default_workers() -> int:
     return max(1, min(MAX_WORKERS, (os.cpu_count() or 2) - 1))
 
 
+def content_length(headers: Any) -> int:
+    """The declared body size, or -1 when the header is not a number."""
+    try:
+        return int(headers.get("Content-Length", "0") or "0")
+    except ValueError:
+        return -1
+
+
+def bounded_int(value: Any, default: int, low: int, high: int) -> int:
+    try:
+        number = int(value)
+    except (TypeError, ValueError):
+        return default
+    return max(low, min(high, number))
+
+
 class RouterContext:
-    def __init__(self, cache_dir: Path, device: str, device_label: str, workers: int) -> None:
+    def __init__(self, cache_dir: Path, device: str, device_label: str, workers: int, token: str) -> None:
         self.cache = FeatureCache(cache_dir)
         self.inbox = UploadInbox(cache_dir / "inbox")
         self.inbox.purge_stale()
         self.device_label = device_label
+        self.token = token
         self.runner = JobRunner(self.cache, self.inbox, device, workers)
 
 
 def make_handler(ctx: RouterContext) -> type[BaseHTTPRequestHandler]:
     class Handler(BaseHTTPRequestHandler):
-        server_version = "AiDjRouter/1.0"
+        server_version = "AiDjRouter/1.1"
 
         def log_message(self, format: str, *args: Any) -> None:
             print(f"[ai_router] {self.address_string()} - {format % args}")
@@ -53,17 +78,32 @@ def make_handler(ctx: RouterContext) -> type[BaseHTTPRequestHandler]:
             self.end_headers()
             self.wfile.write(body)
 
+        def _authorized(self) -> bool:
+            """Without a token every request is allowed; with one, it must match exactly."""
+            if not ctx.token:
+                return True
+            supplied = self.headers.get(TOKEN_HEADER, "")
+            if hmac.compare_digest(supplied.encode("utf-8"), ctx.token.encode("utf-8")):
+                return True
+            # The request body is left unread, so this connection cannot be reused.
+            self.close_connection = True
+            self._send_json(HTTPStatus.UNAUTHORIZED, {"error": "unauthorized: wrong or missing server token"})
+            return False
+
         def _read_json(self) -> dict[str, Any] | None:
-            length = int(self.headers.get("Content-Length", "0") or "0")
-            if length <= 0 or length > 4 * 1024 * 1024:
+            length = content_length(self.headers)
+            if length <= 0 or length > MAX_JSON_BYTES:
                 return None
             raw = self.rfile.read(length)
             try:
-                return json.loads(raw.decode("utf-8"))
+                data = json.loads(raw.decode("utf-8"))
             except (UnicodeDecodeError, ValueError):
                 return None
+            return data if isinstance(data, dict) else None
 
         def do_GET(self) -> None:  # noqa: N802
+            if not self._authorized():
+                return
             if self.path == "/api/v1/health":
                 self._send_json(
                     HTTPStatus.OK,
@@ -80,6 +120,8 @@ def make_handler(ctx: RouterContext) -> type[BaseHTTPRequestHandler]:
             self._send_json(HTTPStatus.NOT_FOUND, {"error": "Not found"})
 
         def do_POST(self) -> None:  # noqa: N802
+            if not self._authorized():
+                return
             if self.path == "/api/v1/check-cache":
                 self._handle_check_cache()
             elif self.path == "/api/v1/upload-track":
@@ -92,31 +134,27 @@ def make_handler(ctx: RouterContext) -> type[BaseHTTPRequestHandler]:
                 self._send_json(HTTPStatus.NOT_FOUND, {"error": "Not found"})
 
         def _handle_check_cache(self) -> None:
+            """Answers at once: what is not analysed yet, and which of those the inbox still holds."""
             data = self._read_json()
             if not data or not isinstance(data.get("tracks"), list):
                 self._send_json(HTTPStatus.BAD_REQUEST, {"error": "Invalid tracks payload"})
                 return
             missing: list[str] = []
-            reanalyze: list[str] = []
-            for item in data["tracks"]:
+            stored: list[str] = []
+            for item in data["tracks"][:MAX_JOB_TRACKS]:
+                if not isinstance(item, dict):
+                    continue
                 tid = str(item.get("id", ""))
                 fp = str(item.get("fingerprint", ""))
                 if not tid or ctx.cache.has(tid, fp):
                     continue
                 if ctx.inbox.has(tid, fp):
-                    reanalyze.append(tid)
+                    stored.append(tid)
                 else:
                     missing.append(tid)
-            # If audio is already stored in inbox but profile version changed, re-analyse it now
-            if reanalyze and not missing:
-                job = ctx.runner.start(reanalyze)
-                for _ in range(SELF_TEST_POLLS):
-                    if job.is_finished():
-                        break
-                    time.sleep(0.25)
-            else:
-                missing.extend(reanalyze)
-            self._send_json(HTTPStatus.OK, {"missing_ids": missing})
+            # Stored songs need analysing but no upload. They stay in missing_ids as well, so
+            # clients that predate stored_ids still work: they simply upload them again.
+            self._send_json(HTTPStatus.OK, {"missing_ids": missing + stored, "stored_ids": stored})
 
         def _handle_upload_track(self) -> None:
             track_id = self.headers.get("X-Track-Id", "").strip()
@@ -124,7 +162,7 @@ def make_handler(ctx: RouterContext) -> type[BaseHTTPRequestHandler]:
             artist = unquote_plus(self.headers.get("X-Track-Artist", "")).strip()
             fingerprint = self.headers.get("X-Track-Fingerprint", "").strip()
             filename = unquote_plus(self.headers.get("X-Track-Filename", "track.mp3")).strip()
-            length = int(self.headers.get("Content-Length", "0") or "0")
+            length = content_length(self.headers)
 
             if not track_id or length <= 0 or length > MAX_UPLOAD_BYTES:
                 self._send_json(HTTPStatus.BAD_REQUEST, {"error": "Invalid upload headers or size"})
@@ -156,12 +194,12 @@ def make_handler(ctx: RouterContext) -> type[BaseHTTPRequestHandler]:
                 self._send_json(HTTPStatus.BAD_REQUEST, {"error": "Invalid track_ids"})
                 return
             profiles = []
-            for tid in data["track_ids"]:
+            for tid in data["track_ids"][:MAX_JOB_TRACKS]:
                 p = ctx.cache.get(str(tid))
                 if p is not None:
                     profiles.append(p)
-            playlist_count = int(data.get("playlist_count", 3))
-            tracks_per = int(data.get("tracks_per_playlist", 5))
+            playlist_count = bounded_int(data.get("playlist_count"), 3, 1, MAX_PLAYLISTS)
+            tracks_per = bounded_int(data.get("tracks_per_playlist"), 5, 2, MAX_TRACKS_PER_PLAYLIST)
             playlists = generate_mashup_playlists(profiles, playlist_count, tracks_per)
             self._send_json(HTTPStatus.OK, {"playlists": playlists})
 
@@ -178,6 +216,21 @@ def _write_test_wav(path: Path, freq_hz: float, duration_sec: float = 32.0) -> N
         wf.setsampwidth(2)
         wf.setframerate(sr)
         wf.writeframes(pcm.tobytes())
+
+
+def _matrix_error(profiles: list[dict[str, Any]], table: CueTable) -> float:
+    """Largest gap between the vectorised matrix and score_transition over every cue pair."""
+    worst = 0.0
+    for first in profiles:
+        for second in profiles:
+            bpm_a = float(first.get("bpm", 120.0) or 120.0)
+            bpm_b = float(second.get("bpm", 120.0) or 120.0)
+            for i, out_cue in enumerate(first["cues"]):
+                for j, in_cue in enumerate(second["cues"]):
+                    expected = score_transition(out_cue, in_cue, bpm_a, bpm_b)
+                    actual = table.score_of(first["track_id"], i, second["track_id"], j)
+                    worst = max(worst, abs(expected - actual))
+    return worst
 
 
 def run_self_test(device: str, workers: int, device_label: str) -> None:
@@ -212,20 +265,17 @@ def run_self_test(device: str, workers: int, device_label: str) -> None:
 
         profiles = [cache.get(tid) for tid in ids]
         assert all(p is not None for p in profiles), "Expected every song in the cache"
+        assert all("loudness_db" in p for p in profiles), "Expected a loudness in every profile"
+        started = time.perf_counter()
         table = CueTable(profiles)
-        first, second = profiles[0], profiles[1]
-        expected = score_transition(
-            first["cues"][0],
-            second["cues"][0],
-            float(first.get("bpm", 120.0)),
-            float(second.get("bpm", 120.0)),
-        )
-        actual = table.score_of(first["track_id"], 0, second["track_id"], 0)
-        assert abs(expected - actual) < 1e-3, f"Score matrix mismatch: {expected} vs {actual}"
+        print(f"Scored {table.scores.size} cue pairs in {time.perf_counter() - started:.3f}s")
+        worst = _matrix_error(profiles, table)
+        assert worst < MATRIX_TOLERANCE, f"Score matrix differs from score_transition by {worst}"
 
         started = time.perf_counter()
         playlists = generate_mashup_playlists(profiles, playlist_count=2, tracks_per_playlist=3)
         assert playlists, "Expected at least one generated mashup playlist"
+        assert all("gain_db" in seg for seg in playlists[0]["segments"]), "Expected a gain per segment"
         print(f"Routed in {time.perf_counter() - started:.2f}s")
         print(f"Self-test passed! Sample route: {playlists[0]['route_string']}")
 
@@ -248,6 +298,11 @@ def main() -> None:
         default=default_workers(),
         help="processes that decode songs in parallel",
     )
+    parser.add_argument(
+        "--token",
+        default=os.environ.get(TOKEN_ENV, ""),
+        help=f"shared secret every request must send in {TOKEN_HEADER} (default: ${TOKEN_ENV})",
+    )
     args = parser.parse_args()
 
     # PyTorch is imported only here, so the decode worker processes never load it.
@@ -264,11 +319,14 @@ def main() -> None:
         run_self_test(device, workers, label)
         return
 
-    ctx = RouterContext(args.cache_dir, device, label, workers)
+    token = str(args.token or "").strip()
+    if not token and args.host not in LOCAL_HOSTS:
+        print("[ai_router] WARNING: no --token set; anyone on the network can use this server")
+    ctx = RouterContext(args.cache_dir, device, label, workers, token)
     server = ThreadingHTTPServer((args.host, args.port), make_handler(ctx))
     print(
         f"AI DJ Router listening on http://{args.host}:{args.port} "
-        f"(device={label}, workers={workers}, cached={ctx.cache.count()})"
+        f"(device={label}, workers={workers}, cached={ctx.cache.count()}, auth={'token' if token else 'off'})"
     )
     try:
         server.serve_forever()

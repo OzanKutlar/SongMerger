@@ -8,7 +8,9 @@ from typing import Any
 import librosa
 import numpy as np
 
-PROFILE_VERSION = 2
+PROFILE_VERSION = 3  # 3: beat-snapped cues and loudness_db
+LOUDNESS_GATE = 0.1  # frames quieter than this share of the loudest frame do not count
+SILENCE_DB = -60.0
 SAMPLE_RATE = 22050
 HOP_LENGTH = 512
 WINDOW_SEC = 4.5
@@ -146,8 +148,22 @@ def _pick_phrase_cues(
             if all(abs(f - existing) >= spacing_frames // 2 for existing in chosen):
                 chosen.append(f)
 
-    chosen.sort()
-    return chosen[:MAX_CUES_PER_TRACK]
+    snapped = _snap_to_beats(chosen, beat_frames, min_frame, max_frame)
+    return snapped[:MAX_CUES_PER_TRACK]
+
+
+def _snap_to_beats(frames: list[int], beat_frames: np.ndarray, min_frame: int, max_frame: int) -> list[int]:
+    """Moves each cue onto its nearest beat, so a transition starts on the beat grid."""
+    beats = np.asarray(beat_frames, dtype=int)
+    beats = beats[(beats >= min_frame) & (beats <= max_frame)]
+    if beats.size == 0:
+        return sorted(set(int(frame) for frame in frames))
+    snapped: set[int] = set()
+    for frame in frames:
+        idx = int(np.searchsorted(beats, frame))
+        options = beats[max(0, idx - 1):min(beats.size, idx + 1)]
+        snapped.add(int(options[int(np.argmin(np.abs(options - frame)))]))
+    return sorted(snapped)
 
 
 def _sample_rhythm_signature(
@@ -233,8 +249,9 @@ def _extract_cue_descriptor(
     }
 
 
-def decode_audio(file_path: Path) -> np.ndarray:
-    """CPU work, safe in a worker process: peak-normalised mono float32 at SAMPLE_RATE."""
+def decode_audio_with_peak(file_path: Path) -> tuple[np.ndarray, float]:
+    """CPU work, safe in a worker process: peak-normalised mono float32 at SAMPLE_RATE, plus the
+    original peak, so the true loudness survives the normalisation."""
     y, sr = librosa.load(str(file_path), sr=SAMPLE_RATE, mono=True, duration=MAX_ANALYSIS_SEC)
     if y is None or len(y) == 0:
         raise ValueError("Decoded audio is empty")
@@ -247,7 +264,24 @@ def decode_audio(file_path: Path) -> np.ndarray:
     peak = float(np.max(np.abs(y)))
     if peak > 1e-6:
         y = (y / peak).astype(np.float32)
-    return np.ascontiguousarray(y, dtype=np.float32)
+    return np.ascontiguousarray(y, dtype=np.float32), peak
+
+
+def decode_audio(file_path: Path) -> np.ndarray:
+    """The peak-normalised signal alone."""
+    return decode_audio_with_peak(file_path)[0]
+
+
+def _loudness_db(rms: np.ndarray, peak: float) -> float:
+    """Gated RMS level of the original (not peak-normalised) signal, in dBFS."""
+    values = np.asarray(rms, dtype=np.float64).reshape(-1)
+    if values.size == 0 or not math.isfinite(peak) or peak <= 1e-9:
+        return SILENCE_DB
+    loud = values[values >= LOUDNESS_GATE * float(np.max(values))]
+    if loud.size == 0:
+        return SILENCE_DB
+    level = math.sqrt(float(np.mean(loud * loud))) * peak
+    return round(20.0 * math.log10(max(level, 1e-3)), 2)
 
 
 def librosa_features(y: np.ndarray) -> dict[str, np.ndarray]:
@@ -278,8 +312,12 @@ def build_profile(
     title: str,
     artist: str,
     fingerprint: str,
+    peak: float = 1.0,
 ) -> dict[str, Any]:
-    """Picks phrase-boundary cues and describes each one; shared by the GPU and CPU paths."""
+    """Picks phrase-boundary cues and describes each one; shared by the GPU and CPU paths.
+
+    [peak] is the signal's peak before normalising, used to report its true loudness.
+    """
     missing = [key for key in FEATURE_KEYS if key not in features]
     if missing:
         raise ValueError(f"Missing features: {missing}")
@@ -330,6 +368,7 @@ def build_profile(
         "fingerprint": fingerprint,
         "duration_ms": int(round(duration_sec * 1000.0)),
         "bpm": bpm,
+        "loudness_db": _loudness_db(rms, peak),
         "cues": cues,
     }
 
@@ -341,11 +380,12 @@ def analyze_decoded(
     artist: str,
     fingerprint: str,
     extractor: Any = None,
+    peak: float = 1.0,
 ) -> dict[str, Any]:
     """Profiles an already decoded signal; [extractor] is a gpu_features.FeatureExtractor or None."""
     features = extractor.extract(y) if extractor is not None else librosa_features(y)
     duration_sec = float(len(y)) / float(SAMPLE_RATE)
-    return build_profile(features, duration_sec, track_id, title, artist, fingerprint)
+    return build_profile(features, duration_sec, track_id, title, artist, fingerprint, peak)
 
 
 def analyze_audio_file(
@@ -357,7 +397,8 @@ def analyze_audio_file(
     extractor: Any = None,
 ) -> dict[str, Any]:
     """Decodes and profiles one file in the calling thread."""
-    return analyze_decoded(decode_audio(file_path), track_id, title, artist, fingerprint, extractor)
+    y, peak = decode_audio_with_peak(file_path)
+    return analyze_decoded(y, track_id, title, artist, fingerprint, extractor, peak)
 
 
 class FeatureCache:

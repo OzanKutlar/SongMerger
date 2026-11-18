@@ -33,7 +33,12 @@ import java.util.concurrent.ExecutionException
  * or tapping "Play next" works predictably. The reordering and the pre-shuffle order live
  * in the service; this class only asks for them. Main thread only.
  */
-class PlayerConnection(context: Context, private val listener: NowPlayingListener) {
+class PlayerConnection(
+    context: Context,
+    private val listener: NowPlayingListener,
+    /** The crossfade between normal songs from the settings, read as songs are queued. */
+    private val songCrossfadeMs: () -> Long = { 0L }
+) {
 
     private val appContext = context.applicationContext
     private val main = Handler(Looper.getMainLooper())
@@ -419,6 +424,10 @@ class PlayerConnection(context: Context, private val listener: NowPlayingListene
             if (segment != null) {
                 putLong(QueueCommands.EXTRA_CROSSFADE_MS, segment.crossfadeMs)
                 putFloat(QueueCommands.EXTRA_TEMPO_RATIO, segment.tempoRatio)
+                if (segment.gainDb != 0f) putFloat(QueueCommands.EXTRA_GAIN_DB, segment.gainDb)
+            } else {
+                val fade = songCrossfadeMs().coerceIn(0L, QueueCommands.MAX_CROSSFADE_MS)
+                if (fade > 0L) putLong(QueueCommands.EXTRA_CROSSFADE_MS, fade)
             }
         }
         val metadata = MediaMetadata.Builder()

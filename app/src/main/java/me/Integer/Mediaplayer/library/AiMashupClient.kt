@@ -21,7 +21,7 @@ import java.util.concurrent.atomic.AtomicBoolean
  * worker thread only. Every failure is an [IOException]; a [ServerException] means the
  * server answered but refused the request or sent something unusable.
  */
-class AiMashupClient(context: Context, baseUrl: String) {
+class AiMashupClient(context: Context, baseUrl: String, token: String = "") {
 
     class ServerException(message: String) : IOException(message)
 
@@ -32,6 +32,12 @@ class AiMashupClient(context: Context, baseUrl: String) {
 
     /** What the server reports about itself; [device] is where it analyses songs. */
     data class Health(val cachedTracks: Int, val device: String)
+
+    /**
+     * [missing] are songs the server cannot use yet; [stored] is the part of them whose audio
+     * the server already holds, so they need analysing but no upload.
+     */
+    data class CacheReport(val missing: Set<String>, val stored: Set<String>)
 
     /** Progress of a server-side analysis job; [failed] counts songs it could not use. */
     data class JobStatus(val phase: String, val done: Int, val total: Int, val failed: Int, val error: String) {
@@ -44,6 +50,7 @@ class AiMashupClient(context: Context, baseUrl: String) {
 
     private val resolver = context.applicationContext.contentResolver
     private val base = PlayerSettings.sanitiseServerUrl(baseUrl)
+    private val authToken = PlayerSettings.sanitiseToken(token)
 
     // ------------------------------------------------------------------ requests
 
@@ -54,8 +61,8 @@ class AiMashupClient(context: Context, baseUrl: String) {
         return Health(answer.optInt("cached_tracks", 0), answer.optString("device").ifEmpty { "cpu" })
     }
 
-    /** The ids of [tracks] the server has not analysed yet, or whose file changed since. */
-    fun missing(tracks: List<RemoteTrack>): Set<String> {
+    /** Which of [tracks] the server has not analysed yet (or whose file changed since). */
+    fun checkCache(tracks: List<RemoteTrack>): CacheReport {
         val body = encoding {
             val array = JSONArray()
             for (item in tracks) {
@@ -64,9 +71,17 @@ class AiMashupClient(context: Context, baseUrl: String) {
             JSONObject().put("tracks", array)
         }
         val answer = postJson(PATH_CHECK, body, QUICK_TIMEOUT_MS)
-        val array = answer.optJSONArray("missing_ids") ?: throw ServerException("the cache answer is incomplete")
+        val missingArray = answer.optJSONArray("missing_ids") ?: throw ServerException("the cache answer is incomplete")
+        val missing = idsOf(missingArray, tracks.size)
+        // Servers from before stored_ids leave it out; then every missing song is uploaded.
+        val stored = idsOf(answer.optJSONArray("stored_ids"), tracks.size).filterTo(HashSet()) { it in missing }
+        return CacheReport(missing, stored)
+    }
+
+    private fun idsOf(array: JSONArray?, limit: Int): Set<String> {
+        if (array == null) return emptySet()
         val ids = HashSet<String>()
-        for (i in 0 until minOf(array.length(), tracks.size)) {
+        for (i in 0 until minOf(array.length(), limit)) {
             val id = array.optString(i)
             if (id.isNotEmpty()) ids.add(id)
         }
@@ -159,7 +174,8 @@ class AiMashupClient(context: Context, baseUrl: String) {
                     startMs = step.optLong("start_ms", 0L),
                     endMs = step.optLong("end_ms", MixSegment.END_OF_TRACK),
                     crossfadeMs = step.optLong("crossfade_ms", MixSegment.DEFAULT_CROSSFADE_MS),
-                    tempoRatio = step.optDouble("tempo_ratio", 1.0).toFloat()
+                    tempoRatio = step.optDouble("tempo_ratio", 1.0).toFloat(),
+                    gainDb = step.optDouble("gain_db", 0.0).toFloat()
                 )
             )
         }
@@ -177,6 +193,7 @@ class AiMashupClient(context: Context, baseUrl: String) {
         connection.readTimeout = readTimeoutMs
         connection.useCaches = false
         connection.setRequestProperty("Accept", "application/json")
+        if (authToken.isNotEmpty()) connection.setRequestProperty(TOKEN_HEADER, authToken)
         return connection
     }
 
@@ -287,6 +304,7 @@ class AiMashupClient(context: Context, baseUrl: String) {
 
     private companion object {
         const val TAG = "AiMashupClient"
+        const val TOKEN_HEADER = "X-Auth-Token"
         const val PATH_HEALTH = "/api/v1/health"
         const val PATH_CHECK = "/api/v1/check-cache"
         const val PATH_UPLOAD = "/api/v1/upload-track"

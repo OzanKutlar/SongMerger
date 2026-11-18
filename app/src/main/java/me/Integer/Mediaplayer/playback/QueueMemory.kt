@@ -24,7 +24,9 @@ internal data class SavedItem(
     /** Where a mashup step stops, or [TO_END] for the whole song. */
     val clipEndMs: Long = TO_END,
     val crossfadeMs: Long = 0L,
-    val tempoRatio: Float = 1f
+    val tempoRatio: Float = 1f,
+    /** Loudness correction of a mashup step, 0 or below. */
+    val gainDb: Float = 0f
 ) {
     companion object {
         const val TO_END = -1L
@@ -71,7 +73,11 @@ internal object QueueCodec {
     private const val ON = "1"
     private const val OFF = "0"
     private const val ORDER_SEPARATOR = ","
-    private const val ITEM_PARTS = 10
+    private const val ITEM_PARTS = 11
+
+    /** Queues saved before the gain field have one part less; they still load. */
+    private const val LEGACY_ITEM_PARTS = 10
+    private const val MIN_GAIN_DB = -12f
     private const val HEADER_LINES = 3
     private const val LINE_ESTIMATE = 128
     private const val ESCAPE_SLACK = 8
@@ -183,7 +189,7 @@ internal object QueueCodec {
         val fields = arrayOf(
             item.uri, item.title, item.artist, item.album,
             item.uid.toString(), item.clipStartMs.toString(), item.clipEndMs.toString(),
-            item.crossfadeMs.toString(), item.tempoRatio.toString()
+            item.crossfadeMs.toString(), item.tempoRatio.toString(), item.gainDb.toString()
         )
         for (field in fields) out.append(TAB).append(escape(field))
         out.append(NEWLINE)
@@ -198,7 +204,7 @@ internal object QueueCodec {
     }
 
     private fun parseItem(parts: List<String>): SavedItem? {
-        if (parts.size != ITEM_PARTS) return null
+        if (parts.size != ITEM_PARTS && parts.size != LEGACY_ITEM_PARTS) return null
         val uri = unescape(parts[1])
         val uid = parts[5].toLongOrNull()
         if (uri.isEmpty() || uid == null) return null
@@ -206,6 +212,7 @@ internal object QueueCodec {
         val end = parts[7].toLongOrNull()?.takeIf { it > start } ?: SavedItem.TO_END
         val crossfade = parts[8].toLongOrNull()?.coerceIn(0L, MAX_CROSSFADE_MS) ?: 0L
         val tempo = parts[9].toFloatOrNull()?.takeIf { it.isFinite() }?.coerceIn(MIN_TEMPO, MAX_TEMPO) ?: 1f
+        val gain = parts.getOrNull(10)?.toFloatOrNull()?.takeIf { it.isFinite() }?.coerceIn(MIN_GAIN_DB, 0f) ?: 0f
         return SavedItem(
             uri = uri,
             title = unescape(parts[2]),
@@ -215,7 +222,8 @@ internal object QueueCodec {
             clipStartMs = start,
             clipEndMs = end,
             crossfadeMs = crossfade,
-            tempoRatio = tempo
+            tempoRatio = tempo,
+            gainDb = gain
         )
     }
 }

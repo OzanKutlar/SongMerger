@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    The AI mashup server runs on a computer in the home network and speaks plain http.
+    Android cannot whitelist "any private address", so cleartext stays allowed, but it is now
+    declared in this one place. The server token (Settings, AI mashup server) keeps strangers out.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>

@@ -3,7 +3,7 @@ package me.Integer.Mediaplayer.library
 import android.content.Context
 import java.util.Locale
 
-/** User settings: the artist separator, the sort orders, and the mashup server address. */
+/** User settings: the artist separator, the sort orders, crossfade, and the mashup server. */
 class PlayerSettings(context: Context) {
 
     private val prefs = context.applicationContext.getSharedPreferences(FILE, Context.MODE_PRIVATE)
@@ -42,18 +42,45 @@ class PlayerSettings(context: Context) {
             prefs.edit().putString(KEY_AI_SERVER, sanitiseServerUrl(value)).apply()
         }
 
+    /** Shared secret sent to the mashup server; empty when the server runs without one. */
+    var aiServerToken: String
+        get() = sanitiseToken(prefs.getString(KEY_AI_TOKEN, ""))
+        set(value) {
+            prefs.edit().putString(KEY_AI_TOKEN, sanitiseToken(value)).apply()
+        }
+
+    /** Crossfade between normal songs in whole seconds; 0 turns it off. */
+    var crossfadeSeconds: Int
+        get() = prefs.getInt(KEY_CROSSFADE, 0).coerceIn(0, MAX_CROSSFADE_SECONDS)
+        set(value) {
+            prefs.edit().putInt(KEY_CROSSFADE, value.coerceIn(0, MAX_CROSSFADE_SECONDS)).apply()
+        }
+
+    val crossfadeMs: Long
+        get() = crossfadeSeconds * MS_PER_SECOND
+
     companion object {
         const val DEFAULT_SEPARATOR = ","
         const val MAX_SEPARATOR_LENGTH = 8
         const val MAX_SERVER_URL_LENGTH = 200
+        const val MAX_TOKEN_LENGTH = 128
+        const val MAX_CROSSFADE_SECONDS = 12
+        private const val MS_PER_SECOND = 1000L
         private const val FILE = "player_settings"
         private const val KEY_SEPARATOR = "artist_separator"
         private const val KEY_SORT = "track_sort"
         private const val KEY_ARTIST_SORT = "artist_sort"
         private const val KEY_AI_SERVER = "ai_server_url"
+        private const val KEY_AI_TOKEN = "ai_server_token"
+        private const val KEY_CROSSFADE = "crossfade_seconds"
         private const val HTTP = "http://"
         private const val HTTPS = "https://"
         private const val SCHEME_MARK = "://"
+
+        /** Printable ASCII only, so the token is always a valid header value. */
+        fun sanitiseToken(raw: String?): String {
+            return raw?.trim().orEmpty().take(MAX_TOKEN_LENGTH).filter { it in '!'..'~' }
+        }
 
         /** Trims the input and bounds its length; blank input gives the default. */
         fun sanitise(raw: String?): String {

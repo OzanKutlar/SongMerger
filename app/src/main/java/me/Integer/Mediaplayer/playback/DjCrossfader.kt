@@ -13,6 +13,7 @@ import androidx.media3.exoplayer.ExoPlayer
 import kotlin.math.PI
 import kotlin.math.cos
 import kotlin.math.pow
+import kotlin.math.roundToLong
 
 /**
  * Ping-pong dual-deck DJ mixer. Unlike a single-player handoff, a playing song never
@@ -21,10 +22,14 @@ import kotlin.math.pow
  * 1. ARMED: 3.5 s before the outgoing deck's fade point, the idle deck loads the queue at
  *    the next track index, seeks to its clipped start with volume 0, and buffers to READY.
  * 2. FADING: at the fade point, the incoming deck starts playing and becomes the active
- *    session player. Its volume bleeds in rapidly while the outgoing deck finishes playing
- *    its tail and fades down to 0.
+ *    session player. If the trigger ran late, the incoming deck starts as far into its song
+ *    as the outgoing one has moved on, so their beats stay together. Its volume bleeds in
+ *    rapidly while the outgoing deck finishes playing its tail and fades down to 0.
  * 3. FINISH: the outgoing deck stops and resets, while the incoming deck smoothly glides
  *    its playback speed back to 1.0x if it was tempo-matched.
+ *
+ * Every deck volume includes the item's loudness correction ([QueueCommands.gainOf]), so a
+ * mashup keeps one level. Normal songs with a crossfade from the settings blend the same way.
  */
 internal class DjCrossfader(
     deckA: ExoPlayer,
@@ -49,6 +54,8 @@ internal class DjCrossfader(
     private var incomingUid = 0L
     private var incomingIndex = -1
     private var initialTempo = 1f
+    private var outgoingGain = 1f
+    private var incomingGain = 1f
 
     private var fadeAtMs = 0L
     private var fadeLengthMs = 0L
@@ -74,8 +81,10 @@ internal class DjCrossfader(
         }
 
         override fun onEvents(player: Player, events: Player.Events) {
-            if (events.contains(Player.EVENT_MEDIA_ITEM_TRANSITION) && currentUid(activeDeck) != skippedUid) {
-                skippedUid = 0L
+            if (events.contains(Player.EVENT_MEDIA_ITEM_TRANSITION)) {
+                if (currentUid(activeDeck) != skippedUid) skippedUid = 0L
+                // A song that starts without a blend still gets its own loudness correction.
+                if (stage == Stage.IDLE) activeDeck.volume = restVolume(activeDeck)
             }
             schedule()
         }
@@ -98,17 +107,17 @@ internal class DjCrossfader(
     fun setDucking(ducking: Boolean) {
         duckMultiplier = if (ducking) DUCK_GAIN else 1f
         if (stage == Stage.IDLE) {
-            activeDeck.volume = duckMultiplier
+            activeDeck.volume = restVolume(activeDeck)
         }
     }
 
-    /** Cancels any pending or running blend and restores the active deck to full volume. */
+    /** Cancels any pending or running blend and restores the active deck to its volume. */
     fun abort() {
         main.removeCallbacks(triggerTask)
         if (stage == Stage.IDLE) return
         stage = Stage.IDLE
         stopDeck(idleDeck)
-        activeDeck.volume = duckMultiplier
+        activeDeck.volume = restVolume(activeDeck)
         resetSpeed(activeDeck)
         schedule()
     }
@@ -221,6 +230,8 @@ internal class DjCrossfader(
         incomingUid = QueueCommands.uidOf(nextItem)
         incomingIndex = nextIdx
         initialTempo = tempo
+        outgoingGain = QueueCommands.gainOf(outgoingItem)
+        incomingGain = QueueCommands.gainOf(nextItem)
         fadeAtMs = fadeAt
         fadeLengthMs = fade
         stage = Stage.ARMED
@@ -271,6 +282,7 @@ internal class DjCrossfader(
             skippedUid = uid
             return
         }
+        catchUp(late)
 
         // Swap decks: incoming deck starts playing Song B and becomes the session player;
         // outgoing deck stays on Song A and plays out its fade tail without any seek or bump.
@@ -293,6 +305,19 @@ internal class DjCrossfader(
         restartTicks()
     }
 
+    /**
+     * The outgoing song kept playing while the trigger ran late, so the incoming one starts
+     * that much further in (at its own tempo), keeping the two beat grids together.
+     */
+    private fun catchUp(lateMs: Long) {
+        if (lateMs <= PHASE_TOLERANCE_MS) return
+        try {
+            idleDeck.seekTo((lateMs * initialTempo).roundToLong())
+        } catch (e: RuntimeException) {
+            Log.w(TAG, "cannot advance the incoming deck: ${e.message}")
+        }
+    }
+
     private fun stepFade() {
         if (!activeDeck.playWhenReady || currentUid(activeDeck) != incomingUid) {
             abort()
@@ -313,7 +338,7 @@ internal class DjCrossfader(
     private fun finish() {
         stage = Stage.IDLE
         stopDeck(idleDeck)
-        activeDeck.volume = duckMultiplier
+        activeDeck.volume = restVolume(activeDeck)
         resetSpeed(activeDeck)
     }
 
@@ -321,13 +346,14 @@ internal class DjCrossfader(
      * Fast bleed-in DJ curve:
      * - Incoming rises with t^0.55 so its beat is clearly audible within the first second.
      * - Outgoing holds 1.0 for the first 15% of the overlap, then cosine-fades to 0.
+     * Each deck is scaled by its song's loudness correction.
      */
     private fun applyGains(progress: Float) {
         val inGain = progress.pow(INCOMING_CURVE_EXP).coerceIn(0f, 1f)
         val outPhase = ((progress - OUTGOING_HOLD) / (1f - OUTGOING_HOLD)).coerceIn(0f, 1f)
         val outGain = cos(outPhase * HALF_PI).coerceIn(0f, 1f)
-        activeDeck.volume = inGain * duckMultiplier
-        idleDeck.volume = outGain * duckMultiplier
+        activeDeck.volume = inGain * duckMultiplier * incomingGain
+        idleDeck.volume = outGain * duckMultiplier * outgoingGain
     }
 
     /** Glides the incoming track's tempo back to 1.0x during the second half of the blend. */
@@ -336,6 +362,11 @@ internal class DjCrossfader(
         val t = ((progress - 0.5f) / 0.5f).coerceIn(0f, 1f)
         val speed = initialTempo + (1f - initialTempo) * t
         activeDeck.playbackParameters = PlaybackParameters(speed, 1f)
+    }
+
+    /** The volume of a deck that is not blending: ducking times its song's correction. */
+    private fun restVolume(player: ExoPlayer): Float {
+        return duckMultiplier * QueueCommands.gainOf(player.currentMediaItem)
     }
 
     private fun resetSpeed(player: ExoPlayer) {
@@ -370,6 +401,9 @@ internal class DjCrossfader(
         const val BUFFER_GRACE_MS = 350L
         const val LATE_SLACK_MS = 600L
         const val MIN_FADE_MS = 1000L
+
+        /** Lateness below this is inaudible against the beat; above it the incoming deck catches up. */
+        const val PHASE_TOLERANCE_MS = 40L
 
         const val INCOMING_CURVE_EXP = 0.55f
         const val OUTGOING_HOLD = 0.15f

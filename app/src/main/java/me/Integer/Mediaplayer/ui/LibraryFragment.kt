@@ -18,6 +18,7 @@ import androidx.fragment.app.Fragment
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import me.Integer.Mediaplayer.R
+import me.Integer.Mediaplayer.library.AiMashupGenerator
 import me.Integer.Mediaplayer.library.ArtistSorter
 import me.Integer.Mediaplayer.library.LibraryRepository
 import me.Integer.Mediaplayer.library.PlaylistImporter
@@ -108,6 +109,7 @@ class LibraryFragment : Fragment(R.layout.fragment_library), LibraryRepository.L
         onPlayerChanged()
         PlaylistImporter.get(requireContext()).onAppResumed()
         ImportPlaylistDialog.showStatusDialogIfActive(requireContext())
+        AiMashupGenerator.get(requireContext()).resumeIfPending()
         AiMashupDialog.showStatusDialogIfActive(requireContext(), host)
     }
 
@@ -127,6 +129,10 @@ class LibraryFragment : Fragment(R.layout.fragment_library), LibraryRepository.L
     override fun onLibraryChanged() {
         libraryVersion++
         refresh()
+        // A mashup job interrupted last time can only resume once the library has loaded.
+        if (AiMashupGenerator.get(requireContext()).resumeIfPending()) {
+            AiMashupDialog.showStatusDialogIfActive(requireContext(), host)
+        }
     }
 
     override fun onScanState(state: LibraryRepository.ScanState) {

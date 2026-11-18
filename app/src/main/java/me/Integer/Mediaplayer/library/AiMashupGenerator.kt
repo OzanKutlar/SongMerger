@@ -18,7 +18,12 @@ import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * Generates mashups with the server from the settings: checks which songs the server
- * already knows, sends the others for analysis, then asks for routes.
+ * already knows, sends only the songs it has no audio for, has it analyse the rest, then
+ * asks for routes.
+ *
+ * The server's analysis job id is remembered, so if Android kills the app mid-job the next
+ * launch follows the same job ([resumeIfPending]). While a job runs, [MashupJobService]
+ * keeps the process in the foreground.
  *
  * The public members are main thread only and [Listener] is called on the main thread.
  * The network work runs on one worker thread.
@@ -59,13 +64,15 @@ class AiMashupGenerator private constructor(context: Context) {
 
     private val appContext = context.applicationContext
     private val repository = LibraryRepository.get(appContext)
+    private val jobStore = MashupJobStore(appContext)
     private val main = Handler(Looper.getMainLooper())
     private val listeners = ArrayList<Listener>()
     private val worker = Executors.newSingleThreadExecutor { task ->
         Thread(task, "Mediaplayer-AiMashup").apply { isDaemon = true }
     }
 
-    /** Answers from an older run carry an older number and are dropped. */
+    /** Answers from an older run carry an older number and are dropped. Read by the worker. */
+    @Volatile
     private var generation = 0L
     private var cancelFlag: AtomicBoolean? = null
 
@@ -95,19 +102,32 @@ class AiMashupGenerator private constructor(context: Context) {
             publish(State(Phase.FAILED, failure = Failure.NO_SERVER))
             return false
         }
-        val items = pick(source).map { track ->
-            AiMashupClient.RemoteTrack(idOf(track.uri), fingerprintOf(track), track, repository.displayArtist(track))
-        }
+        val items = pick(source).map { remoteOf(it) }
         if (items.size < MIN_TRACKS) {
             publish(State(Phase.FAILED, failure = Failure.TOO_FEW_SONGS))
             return false
         }
-        val run = ++generation
-        val cancelled = AtomicBoolean(false)
-        cancelFlag = cancelled
-        publish(State(Phase.CONNECTING))
-        val client = AiMashupClient(appContext, url)
-        worker.execute { runJob(run, cancelled, client, items) }
+        jobStore.clear()
+        launch(url) { run, cancelled, client -> generate(run, cancelled, client, items, url) }
+        return true
+    }
+
+    /**
+     * Picks up a server job that was running when the app was last closed or killed. Needs the
+     * library to be loaded, so it is called again once the library arrives.
+     *
+     * @return true when a job was resumed
+     */
+    fun resumeIfPending(): Boolean {
+        if (state.phase != Phase.IDLE || !repository.isLoaded) return false
+        val pending = jobStore.load() ?: return false
+        val url = repository.settings.aiServerUrl
+        val items = repository.resolveTracks(pending.trackUris).map { remoteOf(it) }
+        if (url.isEmpty() || url != pending.serverUrl || items.size < MIN_TRACKS) {
+            jobStore.clear()
+            return false
+        }
+        launch(url) { run, cancelled, client -> resume(run, cancelled, client, items, url, pending.jobId) }
         return true
     }
 
@@ -116,6 +136,7 @@ class AiMashupGenerator private constructor(context: Context) {
         generation++
         cancelFlag?.set(true)
         cancelFlag = null
+        jobStore.clear()
         publish(State())
     }
 
@@ -129,41 +150,102 @@ class AiMashupGenerator private constructor(context: Context) {
         return repository.playlists.createMix(name, mix.segments)
     }
 
+    private fun launch(url: String, job: (Long, AtomicBoolean, AiMashupClient) -> Unit) {
+        val run = ++generation
+        val cancelled = AtomicBoolean(false)
+        cancelFlag = cancelled
+        publish(State(Phase.CONNECTING))
+        MashupJobService.start(appContext)
+        val client = AiMashupClient(appContext, url, repository.settings.aiServerToken)
+        worker.execute { runSafely(run, cancelled) { job(run, cancelled, client) } }
+    }
+
     // ------------------------------------------------------------------ worker thread
 
-    private fun runJob(
-        run: Long,
-        cancelled: AtomicBoolean,
-        client: AiMashupClient,
-        items: List<AiMashupClient.RemoteTrack>
-    ) {
+    /** Turns any failure into a FAILED state, and forgets the job once the run has ended. */
+    private fun runSafely(run: Long, cancelled: AtomicBoolean, body: () -> Unit) {
         try {
-            val device = client.ping().device
-            val missing = client.missing(items)
-            val toSend = items.filter { it.id in missing }
-            val notSent = upload(run, cancelled, client, toSend, device) ?: return
-            if (cancelled.get()) return
-            val sent = toSend.filter { it.id !in notSent }
-            if (sent.isNotEmpty()) analyseOnServer(run, cancelled, client, sent, device, notSent.size)
-            if (cancelled.get()) return
-            val unusable: Set<String> = if (toSend.isEmpty()) emptySet() else client.missing(items)
-            val ready = items.filter { it.id !in unusable }
-            val skipped = items.size - ready.size
-            if (ready.size < MIN_TRACKS) {
-                post(run, State(Phase.FAILED, skipped = skipped, failure = Failure.TOO_FEW_SONGS))
-                return
-            }
-            post(run, State(Phase.ROUTING, skipped = skipped, device = device))
-            val remote = client.route(ready.map { it.id }, PLAYLIST_COUNT, TRACKS_PER_PLAYLIST)
-            post(run, finished(remote, ready, skipped))
+            body()
         } catch (e: IOException) {
-            if (cancelled.get()) return
-            Log.w(TAG, "mashup generation failed: ${e.message}")
-            post(run, State(Phase.FAILED, failure = Failure.SERVER, detail = e.message.orEmpty()))
+            if (!cancelled.get()) {
+                Log.w(TAG, "mashup generation failed: ${e.message}")
+                post(run, State(Phase.FAILED, failure = Failure.SERVER, detail = e.message.orEmpty()))
+            }
         } catch (e: RuntimeException) {
             Log.e(TAG, "mashup generation crashed", e)
             post(run, State(Phase.FAILED, failure = Failure.SERVER, detail = e.message.orEmpty()))
+        } finally {
+            // Runs after the final state; a cancelled run was already forgotten by cancel().
+            main.post { if (run == generation && !state.isRunning) jobStore.clear() }
         }
+    }
+
+    /** A full run: cache check, uploads, analysis, routes. */
+    private fun generate(
+        run: Long,
+        cancelled: AtomicBoolean,
+        client: AiMashupClient,
+        items: List<AiMashupClient.RemoteTrack>,
+        url: String
+    ) {
+        val device = client.ping().device
+        val report = client.checkCache(items)
+        val toSend = items.filter { it.id in report.missing && it.id !in report.stored }
+        val notSent = upload(run, cancelled, client, toSend, device) ?: return
+        if (cancelled.get()) return
+        val toAnalyse = toSend.filter { it.id !in notSent } + items.filter { it.id in report.stored }
+        if (toAnalyse.isNotEmpty()) {
+            val jobId = client.startAnalysis(toAnalyse.map { it.id })
+            jobStore.save(MashupJobStore.Pending(jobId, url, items.map { it.track.uri }))
+            followJob(run, cancelled, client, jobId, toAnalyse.size, device, notSent.size)
+        }
+        if (cancelled.get()) return
+        route(run, client, items, device, recheck = report.missing.isNotEmpty())
+    }
+
+    /** Follows a remembered job; a job the server no longer knows starts a fresh run. */
+    private fun resume(
+        run: Long,
+        cancelled: AtomicBoolean,
+        client: AiMashupClient,
+        items: List<AiMashupClient.RemoteTrack>,
+        url: String,
+        jobId: String
+    ) {
+        val device = client.ping().device
+        val followed = try {
+            followJob(run, cancelled, client, jobId, 0, device, 0)
+            true
+        } catch (e: AiMashupClient.ServerException) {
+            Log.w(TAG, "cannot resume job $jobId, starting over: ${e.message}")
+            false
+        }
+        if (cancelled.get()) return
+        if (followed) {
+            route(run, client, items, device, recheck = true)
+        } else {
+            generate(run, cancelled, client, items, url)
+        }
+    }
+
+    /** Asks for routes over the usable songs; [recheck] asks the server which ones those are. */
+    private fun route(
+        run: Long,
+        client: AiMashupClient,
+        items: List<AiMashupClient.RemoteTrack>,
+        device: String,
+        recheck: Boolean
+    ) {
+        val unusable = if (recheck) client.checkCache(items).missing else emptySet()
+        val ready = items.filter { it.id !in unusable }
+        val skipped = items.size - ready.size
+        if (ready.size < MIN_TRACKS) {
+            post(run, State(Phase.FAILED, skipped = skipped, failure = Failure.TOO_FEW_SONGS))
+            return
+        }
+        post(run, State(Phase.ROUTING, skipped = skipped, device = device))
+        val remote = client.route(ready.map { it.id }, PLAYLIST_COUNT, TRACKS_PER_PLAYLIST)
+        post(run, finished(remote, ready, skipped))
     }
 
     /**
@@ -236,17 +318,20 @@ class AiMashupGenerator private constructor(context: Context) {
         }
     }
 
-    /** Starts the server's analysis of [sent] and follows it until it ends. */
-    private fun analyseOnServer(
+    /**
+     * Polls the analysis job [jobId] until it ends. [total] is the expected song count, or 0
+     * when it is not known yet (a resumed job).
+     */
+    private fun followJob(
         run: Long,
         cancelled: AtomicBoolean,
         client: AiMashupClient,
-        sent: List<AiMashupClient.RemoteTrack>,
+        jobId: String,
+        total: Int,
         device: String,
         uploadFailures: Int
     ) {
-        val jobId = client.startAnalysis(sent.map { it.id })
-        post(run, State(Phase.ANALYSING, total = sent.size, skipped = uploadFailures, device = device))
+        post(run, State(Phase.ANALYSING, total = total, skipped = uploadFailures, device = device))
         for (poll in 0 until MAX_JOB_POLLS) {
             if (cancelled.get()) return
             pause(JOB_POLL_MS)
@@ -327,6 +412,10 @@ class AiMashupGenerator private constructor(context: Context) {
             .distinctBy { it.uri }
             .toList()
         return if (usable.size <= MAX_SOURCE_TRACKS) usable else usable.shuffled().take(MAX_SOURCE_TRACKS)
+    }
+
+    private fun remoteOf(track: Track): AiMashupClient.RemoteTrack {
+        return AiMashupClient.RemoteTrack(idOf(track.uri), fingerprintOf(track), track, repository.displayArtist(track))
     }
 
     /** Changes when the file does, so the server analyses an edited song again. */

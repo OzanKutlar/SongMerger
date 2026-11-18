@@ -436,7 +436,8 @@ class PlaybackService : MediaSessionService() {
             clipStartMs = clip.startPositionMs,
             clipEndMs = end,
             crossfadeMs = QueueCommands.crossfadeOf(item),
-            tempoRatio = QueueCommands.tempoRatioOf(item)
+            tempoRatio = QueueCommands.tempoRatioOf(item),
+            gainDb = QueueCommands.gainDbOf(item)
         )
     }
 
@@ -448,6 +449,7 @@ class PlaybackService : MediaSessionService() {
                 putLong(QueueCommands.EXTRA_CROSSFADE_MS, saved.crossfadeMs)
                 putFloat(QueueCommands.EXTRA_TEMPO_RATIO, saved.tempoRatio)
             }
+            if (saved.gainDb != 0f) putFloat(QueueCommands.EXTRA_GAIN_DB, saved.gainDb)
         }
         val metadata = MediaMetadata.Builder()
             .setTitle(saved.title)

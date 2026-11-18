@@ -15,12 +15,7 @@ import sys
 from collections import namedtuple
 from pathlib import Path
 
-JDK_CANDIDATES = [
-    Path(r"C:\Users\Ozan\.jdks\corretto-21.0.6"),
-    Path(r"C:\Users\Ozan\.jdks\openjdk-19"),
-    Path(r"C:\Program Files\Android\Android Studio\jbr"),
-]
-SDK_PLATFORM_TOOLS = Path(r"C:\Users\Ozan\AppData\Local\Android\Sdk\platform-tools")
+MAX_JDK_CANDIDATES = 8
 
 REPO_ROOT = Path(__file__).resolve().parent
 GRADLEW = REPO_ROOT / ("gradlew.bat" if os.name == "nt" else "gradlew")
@@ -48,6 +43,49 @@ def error(message):
 
 
 # ---------------------------------------------------------------- JDK Setup
+
+def _unescape_property(value):
+    """Undoes Java properties escaping, e.g. C\\:\\\\Users becomes C:\\Users."""
+    out = []
+    escaped = False
+    for char in value:
+        if escaped:
+            out.append(char)
+            escaped = False
+        elif char == "\\":
+            escaped = True
+        else:
+            out.append(char)
+    return "".join(out)
+
+
+def sdk_dir():
+    """The Android SDK from local.properties, the environment, or the usual install place."""
+    try:
+        lines = (REPO_ROOT / "local.properties").read_text(encoding="utf-8").splitlines()
+    except OSError:
+        lines = []
+    for line in lines:
+        stripped = line.strip()
+        if stripped.startswith("sdk.dir="):
+            return Path(_unescape_property(stripped[len("sdk.dir="):]))
+    for name in ("ANDROID_HOME", "ANDROID_SDK_ROOT"):
+        if os.environ.get(name):
+            return Path(os.environ[name])
+    local = os.environ.get("LOCALAPPDATA")
+    return Path(local) / "Android" / "Sdk" if local else Path.home() / "Android" / "Sdk"
+
+
+def jdk_candidates():
+    """JDKs downloaded by Android Studio / IntelliJ, then Android Studio's bundled runtime."""
+    found = []
+    try:
+        found = sorted((p for p in (Path.home() / ".jdks").iterdir() if p.is_dir()), key=lambda p: p.name, reverse=True)
+    except OSError:
+        pass
+    studio = Path(os.environ.get("ProgramFiles", r"C:\Program Files")) / "Android" / "Android Studio" / "jbr"
+    return found[:MAX_JDK_CANDIDATES] + [studio]
+
 
 def java_executable(java_home):
     name = "java.exe" if os.name == "nt" else "java"
@@ -83,7 +121,7 @@ def build_environment():
         java_home = Path(current)
     else:
         java_home = None
-        for candidate in JDK_CANDIDATES:
+        for candidate in jdk_candidates():
             if is_compatible_jdk(candidate):
                 java_home = candidate
                 break
@@ -95,8 +133,9 @@ def build_environment():
     env["PATH"] = str(java_home / "bin") + os.pathsep + env.get("PATH", "")
 
     # Also ensure Android SDK platform-tools is on PATH if adb is not found
-    if shutil.which("adb", path=env.get("PATH")) is None and SDK_PLATFORM_TOOLS.is_dir():
-        env["PATH"] = str(SDK_PLATFORM_TOOLS) + os.pathsep + env.get("PATH", "")
+    platform_tools = sdk_dir() / "platform-tools"
+    if shutil.which("adb", path=env.get("PATH")) is None and platform_tools.is_dir():
+        env["PATH"] = str(platform_tools) + os.pathsep + env.get("PATH", "")
 
     return env
 
@@ -238,7 +277,7 @@ def install(adb, serial, env):
 def main():
     env = build_environment()
     if env is None:
-        error("no compatible JDK 17+ found in JAVA_HOME or C:\\Users\\Ozan\\.jdks")
+        error(f"no compatible JDK 17+ found in JAVA_HOME or {Path.home() / '.jdks'}")
         return 1
     adb = shutil.which("adb", path=env.get("PATH"))
     if adb is None:
