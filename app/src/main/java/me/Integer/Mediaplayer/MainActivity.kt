@@ -86,8 +86,9 @@ class MainActivity : AppCompatActivity(), PlayerHost, Navigator, NowPlayingListe
         artLoader = CoverArtLoader(this, (ART_SIZE_DP * resources.displayMetrics.density).roundToInt())
         miniBar = MiniPlayerBar(findViewById(R.id.miniBar), this, this)
         val launchLayer = findViewById<FrameLayout>(R.id.launchLayer)
-        expander = PlayerExpand(launchLayer, miniBar)
-        songLaunch = SongLaunch(launchLayer, miniBar) { openNowPlaying() }
+        val screens = findViewById<android.view.ViewGroup>(R.id.mainContainer)
+        expander = PlayerExpand(launchLayer, screens, miniBar, this)
+        songLaunch = SongLaunch(launchLayer, miniBar, this) { openNowPlaying() }
         supportFragmentManager.registerFragmentLifecycleCallbacks(screenWatcher, false)
         if (savedInstanceState == null) {
             supportFragmentManager.beginTransaction()

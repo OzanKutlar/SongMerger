@@ -1,168 +1,343 @@
 package me.Integer.Mediaplayer.ui
 
-import android.animation.ValueAnimator
+import android.animation.TimeAnimator
 import android.graphics.Bitmap
-import android.graphics.Outline
+import android.graphics.Color
 import android.graphics.RectF
-import android.util.Log
+import android.graphics.Typeface
+import android.graphics.drawable.BitmapDrawable
 import android.view.View
-import android.view.ViewOutlineProvider
-import android.view.animation.DecelerateInterpolator
-import android.view.animation.Interpolator
-import android.view.animation.LinearInterpolator
 import android.widget.FrameLayout
 import android.widget.ImageView
-import androidx.core.animation.doOnEnd
-import androidx.core.view.drawToBitmap
+import android.widget.TextView
+import androidx.core.content.ContextCompat
 import androidx.recyclerview.widget.RecyclerView
 import me.Integer.Mediaplayer.R
+import me.Integer.Mediaplayer.ui.widgets.IconPart
 import me.Integer.Mediaplayer.ui.widgets.ListGlide
+import me.Integer.Mediaplayer.ui.widgets.MorphCardView
+import me.Integer.Mediaplayer.ui.widgets.MorphScene
 import me.Integer.Mediaplayer.ui.widgets.Motion
+import me.Integer.Mediaplayer.ui.widgets.Spring
+import me.Integer.Mediaplayer.ui.widgets.TextPart
 import me.Integer.Mediaplayer.ui.widgets.ViewGeometry
-import kotlin.math.roundToInt
+import kotlin.math.PI
+import kotlin.math.cos
 
 /**
- * The song launch: the list glides to the song when it is off screen, the row's cover hops
- * out, falls with gravity onto the mini player's record (shrinking, spinning and rounding
- * into a disc), the mini player squashes as it lands, and then grows into the full player.
+ * The song launch: the tapped row becomes the mini player.
  *
- * Playback starts as the cover hops, so the music never waits for the animation. Everything
- * is drawn on [layer]; the list itself only scrolls. Main thread only.
+ * The list glides to the row when it is off screen. The whole row lifts out as a card, hops,
+ * and falls under gravity towards the mini player while morphing into it (size, corners,
+ * colour, the cover becoming the round record, the text moving into place, the buttons
+ * swapping). It lands on a bouncy spring, the real bar takes over underneath, and then the
+ * bar grows into the full player.
+ *
+ * Each step waits for what it needs, with a timeout: the row to be laid out, its cover to be
+ * loaded, and the bar to show the new song. Music starts as the row lifts. Main thread only.
  */
 internal class SongLaunch(
     private val layer: FrameLayout,
     private val miniBar: MiniPlayerBar,
+    private val host: PlayerHost,
     private val openPlayer: () -> Unit
 ) {
 
+    private enum class Phase { IDLE, WAITING, FLYING, LANDED }
+
     private val context = layer.context
     private val density = context.resources.displayMetrics.density
-    private val start = RectF()
-    private val target = RectF()
-    private var glide: ListGlide? = null
-    private var flight: ValueAnimator? = null
-    private var flyer: ImageView? = null
-    private var hiddenThumb: View? = null
-    private var pendingPlay: (() -> Unit)? = null
+    private val spots = MiniPlayerBar.Spots()
+    private val squash = Spring(SQUASH_STIFFNESS, SQUASH_DAMPING)
+    private val ticker = TimeAnimator()
     private val expandTask = Runnable { openPlayer() }
+
+    private var phase = Phase.IDLE
+    private var clock = 0L
+    private var phaseStart = 0L
+    private var glide: ListGlide? = null
+    private var list: RecyclerView? = null
+    private var row = RecyclerView.NO_POSITION
+    private var trackUri = ""
+    private var pendingPlay: (() -> Unit)? = null
+    private var card: MorphCardView? = null
+    private var fadingCard: View? = null
+    private var hiddenRow: View? = null
+
+    // The flight path, in layer coordinates: card centres at the start, the top of the hop and the end.
+    private var fromX = 0f
+    private var fromY = 0f
+    private var toX = 0f
+    private var toY = 0f
+    private var apexY = 0f
+    private var tiltSign = 1f
+
+    init {
+        ticker.setTimeListener { _, totalTime, deltaTime -> onTick(totalTime, deltaTime) }
+    }
 
     /** Plays with the animation from [row] of [list]; a launch still running is replaced. */
     fun launch(list: RecyclerView, row: Int, play: () -> Unit) {
         cancel(runPending = false)
         pendingPlay = play
+        this.list = list
+        this.row = row
+        trackUri = (list.adapter as? TrackAdapter)?.rows()?.getOrNull(row)?.uri.orEmpty()
         if (Motion.durationScale(context) <= 0f || !list.isAttachedToWindow || layer.width == 0) {
             playAndOpen()
             return
         }
         if (ListGlide.isRowVisible(list, row)) {
-            hop(list, row)
+            startWaiting()
             return
         }
         val started = ListGlide.start(list, row) {
             glide = null
-            hop(list, row)
+            startWaiting()
         }
-        if (started == null) hop(list, row) else glide = started
+        if (started == null) startWaiting() else glide = started
     }
 
     /**
      * Ends everything at once and puts every view back.
      *
-     * @param runPending true starts a song that was still waiting for its glide
+     * @param runPending true starts a song that had not started yet
      */
     fun cancel(runPending: Boolean) {
         glide?.cancel()
         glide = null
-        val running = flight
-        flight = null
-        running?.cancel()
+        ticker.end()
+        phase = Phase.IDLE
         layer.removeCallbacks(expandTask)
-        removeFlyer()
+        removeCards()
+        hiddenRow?.let {
+            it.animate().cancel()
+            it.alpha = 1f
+        }
+        hiddenRow = null
+        layer.isClickable = false
         miniBar.releaseHold()
+        list = null
         if (runPending) runPending() else pendingPlay = null
     }
 
-    // ------------------------------------------------------------------ hop and drop
+    // ------------------------------------------------------------------ frame clock
 
-    private fun hop(list: RecyclerView, row: Int) {
-        val thumb = list.findViewHolderForAdapterPosition(row)?.itemView?.findViewById<View>(R.id.trackThumb)
-        val image = thumb?.let { snapshot(it) }
-        if (thumb == null || image == null || !ViewGeometry.rectIn(thumb, layer, start) ||
-            !miniBar.discRectIn(layer, target)
-        ) {
-            playAndOpen()
+    private fun restartClock() {
+        ticker.end()
+        clock = 0L
+        phaseStart = 0L
+        ticker.start()
+    }
+
+    private fun onTick(totalMs: Long, deltaMs: Long) {
+        clock = totalMs
+        val dt = (deltaMs / 1000f).coerceIn(0f, MAX_FRAME_SECONDS)
+        when (phase) {
+            Phase.WAITING -> waitForRow()
+            Phase.FLYING -> fly()
+            Phase.LANDED -> settle(dt)
+            Phase.IDLE -> ticker.end()
+        }
+    }
+
+    // ------------------------------------------------------------------ waiting
+
+    private fun startWaiting() {
+        phase = Phase.WAITING
+        layer.isClickable = true
+        restartClock()
+    }
+
+    /** Waits for the row to be laid out and, briefly, for its cover to finish loading. */
+    private fun waitForRow() {
+        val waited = clock - phaseStart
+        val item = list?.findViewHolderForAdapterPosition(row)?.itemView
+        if (item == null || !item.isLaidOut) {
+            if (waited > ROW_WAIT_MS) giveUp()
             return
         }
+        val art = item.findViewById<ImageView>(R.id.trackArt)?.drawable
+        val coverReady = art == null || art is BitmapDrawable
+        if (!coverReady && waited < COVER_WAIT_MS) return
+        if (!beginFlight(item, (art as? BitmapDrawable)?.bitmap)) giveUp()
+    }
+
+    private fun giveUp() {
+        ticker.end()
+        phase = Phase.IDLE
+        layer.isClickable = false
+        playAndOpen()
+    }
+
+    // ------------------------------------------------------------------ flight
+
+    private fun beginFlight(item: View, cover: Bitmap?): Boolean {
+        val title = item.findViewById<TextView>(R.id.trackTitle) ?: return false
+        val artist = item.findViewById<TextView>(R.id.trackArtist) ?: return false
+        val thumb = item.findViewById<View>(R.id.trackThumb) ?: return false
+        val rowRect = RectF()
+        val thumbRect = RectF()
+        val titleRect = RectF()
+        val artistRect = RectF()
+        val placed = ViewGeometry.rectIn(item, layer, rowRect) &&
+            ViewGeometry.rectIn(thumb, layer, thumbRect) &&
+            ViewGeometry.rectIn(title, layer, titleRect) &&
+            ViewGeometry.rectIn(artist, layer, artistRect) &&
+            miniBar.spotsIn(layer, spots, playing = true)
+        if (!placed) return false
+        val scene = MorphScene(
+            fromCard = rowRect,
+            toCard = spots.card,
+            fromCorner = 0f,
+            liftCorner = LIFT_CORNER_DP * density,
+            toCorner = spots.corner,
+            fromColor = ContextCompat.getColor(context, R.color.card),
+            toColor = CoverTint.of(cover),
+            fromBackgroundAlpha = 0f,
+            fromCover = thumbRect,
+            toCover = spots.disc,
+            fromCoverCorner = THUMB_CORNER_DP * density,
+            toCoverCorner = spots.disc.width() / 2f,
+            cover = cover,
+            coverPlaceholder = ContextCompat.getColor(context, R.color.round_button),
+            title = textPart(title, titleRect, spots.title, spots.titleSize, spots.titleFace, spots.titleColor),
+            artist = textPart(artist, artistRect, spots.artist, spots.artistSize, spots.artistFace, spots.artistColor),
+            icons = icons(item)
+        )
+        val view = MorphCardView(context, scene)
+        layer.addView(
+            view,
+            FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT)
+        )
+        card = view
         miniBar.holdForLanding()
+        item.animate().cancel()
+        item.alpha = 0f
+        hiddenRow = item
+        fromX = rowRect.centerX()
+        fromY = rowRect.centerY()
+        toX = spots.card.centerX()
+        toY = spots.card.centerY()
+        apexY = fromY - HOP_DP * density
+        tiltSign = if (toX < fromX) -1f else 1f
         runPending()
-        val outline = RoundOutline(THUMB_CORNER_DP * density)
-        val view = ImageView(context).apply {
-            setImageBitmap(image)
-            scaleType = ImageView.ScaleType.CENTER_CROP
-            outlineProvider = outline
-            clipToOutline = true
-            elevation = FLYER_ELEVATION_DP * density
+        phase = Phase.FLYING
+        phaseStart = clock
+        fly()
+        return true
+    }
+
+    /** The row's line keeps its words; only its place, size and style change into the bar's. */
+    private fun textPart(
+        view: TextView,
+        from: RectF,
+        to: RectF,
+        toSize: Float,
+        toFace: Typeface,
+        toColor: Int
+    ): TextPart {
+        val text = view.text?.toString().orEmpty()
+        return TextPart(
+            text, from, view.textSize, view.typeface ?: Typeface.DEFAULT, view.currentTextColor, false,
+            text, to, toSize, toFace, toColor, false
+        )
+    }
+
+    /** The row's buttons fade out as the bar's previous / pause / next fade in. */
+    private fun icons(item: View): List<IconPart> {
+        val parts = ArrayList<IconPart>(ICON_COUNT)
+        val frame = RectF()
+        val rowIconPx = ROW_ICON_DP * density
+        item.findViewById<View>(R.id.trackPlayNext)?.let { button ->
+            if (ViewGeometry.rectIn(button, layer, frame)) {
+                IconPart.of(context, R.drawable.player_ic_play_next, frame, rowIconPx, ROW_ICON_COLOR, false)?.let(parts::add)
+            }
         }
-        layer.addView(view, FrameLayout.LayoutParams(start.width().roundToInt(), start.height().roundToInt()))
-        thumb.alpha = 0f
-        hiddenThumb = thumb
-        flyer = view
-        place(view, outline, 0f)
-        val anim = ValueAnimator.ofFloat(0f, 1f)
-        anim.duration = HOP_MS + FALL_MS
-        anim.interpolator = LinearInterpolator()
-        anim.addUpdateListener { place(view, outline, it.animatedValue as Float) }
-        anim.doOnEnd { if (flight === anim) land() }
-        flight = anim
-        anim.start()
+        item.findViewById<View>(R.id.trackMenu)?.let { button ->
+            if (ViewGeometry.rectIn(button, layer, frame)) {
+                IconPart.of(context, R.drawable.player_ic_more, frame, rowIconPx, ROW_ICON_COLOR, false)?.let(parts::add)
+            }
+        }
+        IconPart.of(context, R.drawable.player_ic_previous, spots.previous, 0f, Color.WHITE, true)?.let(parts::add)
+        IconPart.of(context, R.drawable.player_ic_pause, spots.play, 0f, Color.WHITE, true)?.let(parts::add)
+        IconPart.of(context, R.drawable.player_ic_next, spots.next, 0f, Color.WHITE, true)?.let(parts::add)
+        return parts
     }
 
     /**
-     * One frame of the flight. First the hop: straight up, easing out, growing slightly. Then
-     * the drop: it hangs at the top and falls faster and faster (gravity), drifting sideways
-     * onto the record while shrinking to its size, spinning and rounding into a disc.
+     * Lift (scale, shadow, rounder corners), then a hop that eases out with a slight tilt,
+     * then a fall that hangs and accelerates like gravity while the card morphs into the bar.
      */
-    private fun place(view: View, outline: RoundOutline, progress: Float) {
-        val width = start.width()
-        val height = start.height()
-        val hopShare = HOP_MS.toFloat() / (HOP_MS + FALL_MS)
-        val apexY = start.centerY() - HOP_DP * density
-        val landingScale = if (width > 0f) target.width() / width else 1f
-        val cx: Float
-        val cy: Float
-        val scale: Float
-        val turn: Float
-        val roundness: Float
-        if (progress < hopShare) {
-            val lift = HOP_CURVE.getInterpolation(progress / hopShare)
-            cx = start.centerX()
-            cy = lerp(start.centerY(), apexY, lift)
-            scale = lerp(1f, LIFT_SCALE, lift)
-            turn = 0f
-            roundness = 0f
-        } else {
-            val fall = ((progress - hopShare) / (1f - hopShare)).coerceIn(0f, 1f)
-            val drift = fall * fall * (3f - 2f * fall)
-            cx = lerp(start.centerX(), target.centerX(), drift)
-            cy = lerp(apexY, target.centerY(), fall * fall)
-            scale = lerp(LIFT_SCALE, landingScale, drift)
-            turn = SPIN_DEGREES * fall * fall
-            roundness = drift
-        }
-        view.translationX = cx - width / 2f
-        view.translationY = cy - height / 2f
-        view.scaleX = scale
-        view.scaleY = scale
-        view.rotation = turn
-        outline.radius = lerp(THUMB_CORNER_DP * density, width / 2f, roundness)
-        view.invalidateOutline()
+    private fun fly() {
+        val view = card ?: return
+        val t = (clock - phaseStart).toFloat()
+        val lift = easeOut((t / LIFT_MS).coerceIn(0f, 1f))
+        val hop = easeOutCubic(((t - HOP_DELAY_MS) / HOP_MS).coerceIn(0f, 1f))
+        val fall = ((t - HOP_DELAY_MS - HOP_MS) / FALL_MS).coerceIn(0f, 1f)
+        val morph = smooth(((fall - MORPH_DELAY) / (1f - MORPH_DELAY)).coerceIn(0f, 1f))
+        val x = lerp(fromX, toX, easeInOutSine(fall))
+        val y = if (fall <= 0f) lerp(fromY, apexY, hop) else lerp(apexY, toY, fall * fall)
+        val scale = 1f + (LIFT_SCALE - 1f) * lift * (1f - fall)
+        val tilt = TILT_DEGREES * tiltSign * hop * (1f - fall)
+        view.update(
+            morph,
+            lift * (1f - LANDED_SHADOW_DROP * fall),
+            x - lerp(fromX, toX, morph),
+            y - lerp(fromY, toY, morph),
+            scale,
+            scale,
+            tilt
+        )
+        if (fall >= 1f) land()
     }
 
+    // ------------------------------------------------------------------ landing
+
     private fun land() {
-        flight = null
-        removeFlyer()
-        miniBar.land()
-        layer.postDelayed(expandTask, LAND_TO_EXPAND_MS)
+        phase = Phase.LANDED
+        phaseStart = clock
+        squash.reset(0f, IMPACT_VELOCITY, 0f)
+    }
+
+    /** Squash and settle; the landed card holds still until the real bar shows the new song. */
+    private fun settle(dt: Float) {
+        val view = card ?: return giveUp()
+        squash.step(dt)
+        val waited = clock - phaseStart
+        if (waited > SQUASH_MAX_MS) squash.settle()
+        val s = squash.value
+        view.update(1f, LANDED_LIFT, 0f, 0f, 1f + SQUASH_X * s, 1f - SQUASH_Y * s, 0f)
+        val settled = squash.isSettled
+        val ready = isBarReady() || waited > BAR_WAIT_MS
+        if (settled && ready) handOver()
+    }
+
+    private fun isBarReady(): Boolean {
+        val state = host.nowPlaying
+        if (!state.active || !host.isArtResolved) return false
+        return trackUri.isEmpty() || state.trackUri == trackUri
+    }
+
+    /** The real bar appears under the card, the card fades off it, and the row returns. */
+    private fun handOver() {
+        ticker.end()
+        phase = Phase.IDLE
+        layer.isClickable = false
+        miniBar.revealAfterLanding()
+        hiddenRow?.animate()?.alpha(1f)?.setDuration(ROW_RETURN_MS)?.start()
+        hiddenRow = null
+        list = null
+        val view = card
+        card = null
+        if (view != null) {
+            fadingCard = view
+            view.animate().alpha(0f).setDuration(HANDOVER_FADE_MS).withEndAction {
+                layer.removeView(view)
+                if (fadingCard === view) fadingCard = null
+            }.start()
+        }
+        layer.postDelayed(expandTask, HANDOVER_TO_EXPAND_MS)
     }
 
     // ------------------------------------------------------------------ helpers
@@ -178,41 +353,61 @@ internal class SongLaunch(
         play?.invoke()
     }
 
-    private fun removeFlyer() {
-        flyer?.let { layer.removeView(it) }
-        flyer = null
-        hiddenThumb?.alpha = 1f
-        hiddenThumb = null
-    }
-
-    private fun snapshot(view: View): Bitmap? {
-        return try {
-            view.drawToBitmap()
-        } catch (e: IllegalStateException) {
-            Log.w(TAG, "cannot copy the cover for the launch: ${e.message}")
-            null
+    private fun removeCards() {
+        card?.let { layer.removeView(it) }
+        card = null
+        fadingCard?.let {
+            it.animate().cancel()
+            layer.removeView(it)
         }
+        fadingCard = null
     }
 
     private fun lerp(a: Float, b: Float, t: Float): Float = a + (b - a) * t
 
-    /** A rounded outline whose radius changes during the flight, so the cover turns into a disc. */
-    private class RoundOutline(var radius: Float) : ViewOutlineProvider() {
-        override fun getOutline(view: View, outline: Outline) {
-            outline.setRoundRect(0, 0, view.width, view.height, radius)
-        }
+    private fun easeOut(x: Float): Float = 1f - (1f - x) * (1f - x)
+
+    private fun easeOutCubic(x: Float): Float {
+        val rest = 1f - x
+        return 1f - rest * rest * rest
     }
 
+    private fun easeInOutSine(x: Float): Float = (-(cos(PI * x) - 1.0) / 2.0).toFloat()
+
+    private fun smooth(x: Float): Float = x * x * (3f - 2f * x)
+
     private companion object {
-        const val TAG = "SongLaunch"
-        const val HOP_MS = 200L
-        const val FALL_MS = 520L
-        const val LAND_TO_EXPAND_MS = 220L
-        const val HOP_DP = 34f
-        const val LIFT_SCALE = 1.18f
-        const val SPIN_DEGREES = 180f
+        const val ROW_WAIT_MS = 450L
+        const val COVER_WAIT_MS = 550L
+        const val BAR_WAIT_MS = 1500L
+        const val SQUASH_MAX_MS = 520L
+        const val HANDOVER_FADE_MS = 150L
+        const val HANDOVER_TO_EXPAND_MS = 170L
+        const val ROW_RETURN_MS = 220L
+        const val MAX_FRAME_SECONDS = 0.05f
+
+        const val LIFT_MS = 160f
+        const val HOP_DELAY_MS = 70f
+        const val HOP_MS = 230f
+        const val FALL_MS = 430f
+        const val MORPH_DELAY = 0.06f
+        const val HOP_DP = 40f
+        const val LIFT_SCALE = 1.04f
+        const val TILT_DEGREES = 2.5f
+        const val LANDED_SHADOW_DROP = 0.5f
+        const val LANDED_LIFT = 0.5f
+
+        // A bouncy landing: the card flattens, overshoots slightly tall, and settles.
+        const val SQUASH_STIFFNESS = 500f
+        const val SQUASH_DAMPING = 0.35f
+        const val IMPACT_VELOCITY = 34f
+        const val SQUASH_X = 0.05f
+        const val SQUASH_Y = 0.11f
+
+        const val LIFT_CORNER_DP = 18f
         const val THUMB_CORNER_DP = 10f
-        const val FLYER_ELEVATION_DP = 10f
-        val HOP_CURVE: Interpolator = DecelerateInterpolator(1.5f)
+        const val ROW_ICON_DP = 22f
+        const val ROW_ICON_COLOR = 0xFFA1A1A6.toInt()
+        const val ICON_COUNT = 5
     }
 }

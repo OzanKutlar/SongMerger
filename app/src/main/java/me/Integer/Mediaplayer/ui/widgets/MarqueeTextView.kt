@@ -99,6 +99,16 @@ class MarqueeTextView @JvmOverloads constructor(
         return content
     }
 
+    /** Text size in pixels, for animations that redraw this label elsewhere. */
+    val textSizePx: Float
+        get() = paint.textSize
+
+    val textColor: Int
+        get() = paint.color
+
+    val textTypeface: Typeface
+        get() = paint.typeface ?: Typeface.DEFAULT
+
     private fun isWrapWidth(): Boolean {
         return layoutParams?.width == ViewGroup.LayoutParams.WRAP_CONTENT
     }

@@ -3,12 +3,12 @@ package me.Integer.Mediaplayer.ui
 import android.animation.ValueAnimator
 import android.graphics.Bitmap
 import android.graphics.RectF
+import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.os.SystemClock
 import android.view.View
 import android.view.animation.AccelerateInterpolator
 import android.view.animation.DecelerateInterpolator
-import android.view.animation.OvershootInterpolator
 import android.widget.ImageView
 import android.widget.TextView
 import me.Integer.Mediaplayer.R
@@ -22,8 +22,8 @@ import me.Integer.Mediaplayer.ui.widgets.ViewGeometry
  * The floating mini player: a rounded bar tinted by the cover, with a small spinning disc,
  * the song and previous / play / next. Tapping the bar opens the full player.
  *
- * It also takes part in the song launch: it can wait hidden while a cover falls towards it,
- * squash when the cover lands, and hand its bounds and colour to the card that grows into
+ * It also takes part in the song launch: it reports where its pieces sit so a song row can
+ * morph into it, stays hidden while that row is landing, and steps aside while it grows into
  * the full player. Main thread only.
  */
 class MiniPlayerBar(
@@ -32,12 +32,36 @@ class MiniPlayerBar(
     private val navigator: Navigator
 ) {
 
+    /** Where everything in the bar sits at rest, for animations that morph into or out of it. */
+    class Spots {
+        val card = RectF()
+        val disc = RectF()
+        val title = RectF()
+        val artist = RectF()
+        val previous = RectF()
+        val play = RectF()
+        val next = RectF()
+        var corner = 0f
+        var color = 0
+        var titleText = ""
+        var artistText = ""
+        var titleSize = 0f
+        var artistSize = 0f
+        var titleFace: Typeface = Typeface.DEFAULT
+        var artistFace: Typeface = Typeface.DEFAULT
+        var titleColor = 0
+        var artistColor = 0
+        var playing = false
+    }
+
     private val density = bar.resources.displayMetrics.density
     private val vinyl: VinylDiscView = bar.findViewById(R.id.miniVinyl)
     private val title: MarqueeTextView = bar.findViewById(R.id.miniTitle)
     private val artist: TextView = bar.findViewById(R.id.miniArtist)
     private val playCell: View = bar.findViewById(R.id.miniPlay)
     private val playIcon: ImageView = bar.findViewById(R.id.miniPlayIcon)
+    private val previousIcon: View = bar.findViewById(R.id.miniPreviousIcon)
+    private val nextIcon: View = bar.findViewById(R.id.miniNextIcon)
     private val unknownTitle = bar.context.getString(R.string.player_unknown_title)
     private val unknownArtist = bar.context.getString(R.string.library_unknown_artist)
     private val playDescription = bar.context.getString(R.string.player_play)
@@ -55,16 +79,12 @@ class MiniPlayerBar(
     private var shown = false
     private var iconPlaying: Boolean? = null
 
-    /** A cover is falling towards the bar: a hidden bar waits for it, and the disc is hidden. */
+    /** A song row is landing where the bar sits: the bar keeps updating but stays invisible. */
     private var held = false
 
-    /** The bar's corner radius, for the card that grows from it. */
+    /** The bar's corner radius. */
     val cornerPx: Float
         get() = CORNER_DP * density
-
-    /** The cover tint shown right now. */
-    val color: Int
-        get() = shownColor
 
     /** True while the bar can be seen. */
     val isOnScreen: Boolean
@@ -75,9 +95,9 @@ class MiniPlayerBar(
         bar.setOnClickListener { navigator.openNowPlaying() }
         val previousCell = bar.findViewById<View>(R.id.miniPrevious)
         val nextCell = bar.findViewById<View>(R.id.miniNext)
-        PressFeedback.attach(previousCell, bar.findViewById(R.id.miniPreviousIcon))
+        PressFeedback.attach(previousCell, previousIcon)
         PressFeedback.attach(playCell, playIcon)
-        PressFeedback.attach(nextCell, bar.findViewById(R.id.miniNextIcon))
+        PressFeedback.attach(nextCell, nextIcon)
         previousCell.setOnClickListener { skipBack() }
         playCell.setOnClickListener { togglePlayback() }
         nextCell.setOnClickListener { host.connection.next() }
@@ -92,8 +112,7 @@ class MiniPlayerBar(
 
     fun render() {
         val state = host.nowPlaying
-        val wanted = state.active && !suppressed
-        setShown(wanted && (shown || !held))
+        setShown(state.active && !suppressed)
         if (!state.active) {
             vinyl.setPlaying(false)
             return
@@ -118,75 +137,80 @@ class MiniPlayerBar(
         colorAnimator = null
     }
 
-    // ------------------------------------------------------------------ song launch
+    // ------------------------------------------------------------------ morphs
 
-    /** The bar in the coordinates of [layer]. */
-    fun boundsIn(layer: View, out: RectF): Boolean {
-        return ViewGeometry.rectIn(bar, layer, out)
-    }
-
-    /** Where the disc is drawn when the bar is at rest, in the coordinates of [layer]. */
-    fun discRectIn(layer: View, out: RectF): Boolean {
-        if (!ViewGeometry.rectIn(vinyl, layer, out)) return false
-        // A hidden bar waits lower down; the cover lands where the bar will rest.
-        out.offset(0f, -bar.translationY)
-        val inset = out.width() * (1f - DISC_SHARE) / 2f
-        out.inset(inset, inset)
+    /**
+     * Fills [out] with where the bar's pieces sit when the bar rests, in [layer] coordinates.
+     *
+     * @param playing the disc is drawn full size while playing and smaller while paused
+     * @return false while the bar has no size yet
+     */
+    fun spotsIn(layer: View, out: Spots, playing: Boolean): Boolean {
+        val placed = ViewGeometry.rectIn(bar, layer, out.card) &&
+            ViewGeometry.rectIn(vinyl, layer, out.disc) &&
+            ViewGeometry.rectIn(title, layer, out.title) &&
+            ViewGeometry.rectIn(artist, layer, out.artist) &&
+            ViewGeometry.rectIn(previousIcon, layer, out.previous) &&
+            ViewGeometry.rectIn(playIcon, layer, out.play) &&
+            ViewGeometry.rectIn(nextIcon, layer, out.next)
+        if (!placed) return false
+        // A hidden bar waits a little lower; report where it rests.
+        val lift = -bar.translationY
+        for (rect in arrayOf(out.card, out.disc, out.title, out.artist, out.previous, out.play, out.next)) {
+            rect.offset(0f, lift)
+        }
+        val share = DISC_SHARE * (if (playing) 1f else DISC_RESTING)
+        val inset = out.disc.width() * (1f - share) / 2f
+        out.disc.inset(inset, inset)
+        out.corner = cornerPx
+        out.color = shownColor
+        out.titleText = title.getText().toString()
+        out.artistText = artist.text?.toString().orEmpty()
+        out.titleSize = title.textSizePx
+        out.titleFace = title.textTypeface
+        out.titleColor = title.textColor
+        out.artistSize = artist.textSize
+        out.artistFace = artist.typeface ?: Typeface.DEFAULT
+        out.artistColor = artist.currentTextColor
+        out.playing = playing
         return true
     }
 
-    /** A cover is on its way: hide the disc, and keep a hidden bar hidden until it lands. */
+    /** A song row is about to land here: the bar disappears at once and waits. */
     fun holdForLanding() {
         held = true
-        vinyl.animate().cancel()
-        vinyl.alpha = 0f
+        bar.animate().cancel()
+        bar.alpha = 0f
+        bar.translationY = 0f
+        bar.scaleX = 1f
+        bar.scaleY = 1f
     }
 
-    /** The launch was called off: everything goes back to normal. */
+    /** The launch was called off: a bar that should show fades back in. */
     fun releaseHold() {
         if (!held) return
         held = false
-        vinyl.alpha = 1f
-        render()
+        if (shown) bar.animate().alpha(1f).setDuration(SHOW_MS).setInterpolator(DecelerateInterpolator()).start()
     }
 
-    /** The cover landed: the bar appears at once if needed, squashes, and the disc pops. */
-    fun land() {
+    /** The landed row hands over: the bar, already showing the new song, appears at once. */
+    fun revealAfterLanding() {
         held = false
-        vinyl.alpha = 1f
-        val wanted = host.nowPlaying.active && !suppressed
-        if (wanted && !shown) {
-            shown = true
-            bar.animate().cancel()
-            bar.visibility = View.VISIBLE
-            bar.alpha = 1f
-            bar.translationY = 0f
-        }
         render()
-        if (shown) squash()
+        if (!shown) return
+        bar.animate().cancel()
+        bar.alpha = 1f
+        bar.translationY = 0f
     }
 
-    /** The card growing into the player covers the bar exactly, so the bar steps aside. */
+    /** The card growing into the player starts exactly on the bar, so the bar steps aside. */
     fun hideForExpand() {
         bar.alpha = 0f
     }
 
     /** The growing card was called off before the player opened. */
     fun restoreAfterExpand() {
-        if (shown) bar.alpha = 1f
-    }
-
-    private fun squash() {
-        bar.pivotX = bar.width / 2f
-        bar.pivotY = bar.height.toFloat()
-        bar.scaleX = SQUASH_X
-        bar.scaleY = SQUASH_Y
-        bar.animate().scaleX(1f).scaleY(1f)
-            .setDuration(SQUASH_MS).setInterpolator(OvershootInterpolator(SQUASH_TENSION)).start()
-        vinyl.scaleX = DISC_POP
-        vinyl.scaleY = DISC_POP
-        vinyl.animate().scaleX(1f).scaleY(1f)
-            .setDuration(SQUASH_MS).setInterpolator(OvershootInterpolator(SQUASH_TENSION)).start()
+        if (shown && !held) bar.alpha = 1f
     }
 
     // ------------------------------------------------------------------ actions
@@ -212,7 +236,7 @@ class MiniPlayerBar(
     /** The icon shrinks away, swaps and grows back, like the big play button. */
     private fun renderPlayIcon(playing: Boolean) {
         if (iconPlaying == playing) return
-        val animate = iconPlaying != null && shown
+        val animate = iconPlaying != null && shown && !held
         iconPlaying = playing
         playCell.contentDescription = if (playing) pauseDescription else playDescription
         if (!animate) {
@@ -248,7 +272,7 @@ class MiniPlayerBar(
 
     private fun applyTint(art: Bitmap?) {
         if (tintApplied && art === tintedArt) return
-        val animate = tintApplied
+        val animate = tintApplied && !held
         tintApplied = true
         tintedArt = art
         val target = CoverTint.of(art)
@@ -270,13 +294,22 @@ class MiniPlayerBar(
         shape.setColor(color)
     }
 
-    /** Hidden means invisible rather than gone, so the bar keeps its place as a landing target. */
+    /**
+     * Hidden means invisible rather than gone, so the bar keeps its place as a landing target.
+     * While a row is landing the bar changes state without showing itself.
+     */
     private fun setShown(show: Boolean) {
         if (show == shown) return
         shown = show
         bar.animate().cancel()
         bar.scaleX = 1f
         bar.scaleY = 1f
+        if (held) {
+            bar.visibility = if (show) View.VISIBLE else View.INVISIBLE
+            bar.alpha = 0f
+            bar.translationY = 0f
+            return
+        }
         val offset = HIDE_OFFSET_DP * density
         if (show) {
             bar.visibility = View.VISIBLE
@@ -300,13 +333,9 @@ class MiniPlayerBar(
         const val TINT_MS = 450L
         const val MORPH_SCALE = 0.4f
         const val MORPH_HALF_MS = 90L
-        const val SQUASH_X = 1.04f
-        const val SQUASH_Y = 0.9f
-        const val SQUASH_MS = 360L
-        const val SQUASH_TENSION = 2.5f
-        const val DISC_POP = 1.25f
 
-        /** The disc's drawn diameter as a share of its view (VinylDiscView's radius fraction × 2). */
+        /** VinylDiscView's disc diameter as a share of its view, and its size while paused. */
         const val DISC_SHARE = 0.87f
+        const val DISC_RESTING = 0.84f
     }
 }
