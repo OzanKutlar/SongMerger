@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Landscape player: record on the left, actions + text and controls on the right -->
+<!-- Landscape player: record on the left; title, actions and controls on the right -->
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
@@ -27,27 +27,28 @@
                 android:layout_width="match_parent"
                 android:layout_height="match_parent"
                 android:layout_gravity="center"
-                android:layout_margin="16dp"
+                android:layout_margin="20dp"
                 android:clickable="true"
                 android:contentDescription="@string/player_cover"
                 android:focusable="true" />
 
             <FrameLayout
                 android:id="@+id/playerClose"
-                android:layout_width="52dp"
-                android:layout_height="52dp"
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:layout_margin="6dp"
                 android:background="@drawable/player_cell_bg"
                 android:clickable="true"
                 android:contentDescription="@string/player_close"
                 android:focusable="true">
 
                 <ImageView
-                    android:layout_width="28dp"
-                    android:layout_height="28dp"
+                    android:layout_width="26dp"
+                    android:layout_height="26dp"
                     android:layout_gravity="center"
                     android:contentDescription="@null"
                     android:src="@drawable/player_ic_down"
-                    android:tint="#FDF8F5" />
+                    android:tint="#FFFFFF" />
             </FrameLayout>
         </FrameLayout>
 
@@ -58,55 +59,16 @@
             android:clipChildren="false"
             android:orientation="vertical">
 
-            <LinearLayout
+            <FrameLayout
                 android:layout_width="match_parent"
-                android:layout_height="52dp"
-                android:gravity="end|center_vertical"
-                android:orientation="horizontal"
-                android:paddingEnd="8dp">
-
-                <FrameLayout
-                    android:id="@+id/playerFavorite"
-                    android:layout_width="52dp"
-                    android:layout_height="52dp"
-                    android:background="@drawable/player_cell_bg"
-                    android:clickable="true"
-                    android:contentDescription="@string/player_favorite"
-                    android:focusable="true">
-
-                    <ImageView
-                        android:id="@+id/playerFavoriteIcon"
-                        android:layout_width="26dp"
-                        android:layout_height="26dp"
-                        android:layout_gravity="center"
-                        android:contentDescription="@null"
-                        android:src="@drawable/player_ic_heart_outline"
-                        android:tint="#FDF8F5" />
-                </FrameLayout>
-
-                <FrameLayout
-                    android:id="@+id/playerQueue"
-                    android:layout_width="52dp"
-                    android:layout_height="52dp"
-                    android:background="@drawable/player_cell_bg"
-                    android:clickable="true"
-                    android:contentDescription="@string/player_queue"
-                    android:focusable="true">
-
-                    <ImageView
-                        android:id="@+id/playerQueueIcon"
-                        android:layout_width="26dp"
-                        android:layout_height="26dp"
-                        android:layout_gravity="center"
-                        android:contentDescription="@null"
-                        android:src="@drawable/player_ic_queue"
-                        android:tint="#FDF8F5" />
-                </FrameLayout>
+                android:layout_height="56dp"
+                android:paddingEnd="6dp">
 
                 <FrameLayout
                     android:id="@+id/playerMore"
-                    android:layout_width="52dp"
-                    android:layout_height="52dp"
+                    android:layout_width="48dp"
+                    android:layout_height="48dp"
+                    android:layout_gravity="end|center_vertical"
                     android:background="@drawable/player_cell_bg"
                     android:clickable="true"
                     android:contentDescription="@string/menu_more"
@@ -114,27 +76,55 @@
 
                     <ImageView
                         android:id="@+id/playerMoreIcon"
-                        android:layout_width="26dp"
-                        android:layout_height="26dp"
+                        android:layout_width="24dp"
+                        android:layout_height="24dp"
                         android:layout_gravity="center"
                         android:contentDescription="@null"
                         android:src="@drawable/player_ic_more"
-                        android:tint="#FDF8F5" />
+                        android:tint="#FFFFFF" />
                 </FrameLayout>
-            </LinearLayout>
+            </FrameLayout>
 
-            <FrameLayout
+            <!-- Fades and slides as one unit on track changes -->
+            <LinearLayout
+                android:id="@+id/playerTextBlock"
                 android:layout_width="match_parent"
-                android:layout_height="0dp"
-                android:layout_weight="1"
-                android:clipChildren="false">
+                android:layout_height="wrap_content"
+                android:gravity="center_horizontal"
+                android:orientation="vertical"
+                android:paddingLeft="24dp"
+                android:paddingRight="24dp">
 
-                <include
-                    layout="@layout/player_panel"
+                <me.Integer.Mediaplayer.ui.widgets.MarqueeTextView
+                    android:id="@+id/playerTitle"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_gravity="center_vertical" />
-            </FrameLayout>
+                    android:fontFamily="sans-serif-medium"
+                    android:gravity="center_horizontal"
+                    android:textColor="#FFFFFF"
+                    android:textSize="22sp" />
+
+                <TextView
+                    android:id="@+id/playerArtist"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:ellipsize="end"
+                    android:gravity="center_horizontal"
+                    android:singleLine="true"
+                    android:textColor="#CCFFFFFF"
+                    android:textSize="15sp" />
+            </LinearLayout>
+
+            <View
+                android:layout_width="match_parent"
+                android:layout_height="0dp"
+                android:layout_weight="1" />
+
+            <include
+                layout="@layout/player_panel"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content" />
         </LinearLayout>
     </LinearLayout>
 

@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Portrait player: top bar, record in the middle, text and controls below -->
+<!-- Portrait player: record near the top with the title under it, controls at the bottom -->
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
@@ -17,31 +17,31 @@
         android:clipChildren="false"
         android:orientation="vertical">
 
-        <!-- Top bar: Close on the left, Favorite / Queue / More on the right -->
+        <!-- Top bar: Close on the left, More on the right -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="56dp"
             android:gravity="center_vertical"
             android:orientation="horizontal"
-            android:paddingStart="4dp"
-            android:paddingEnd="4dp">
+            android:paddingStart="6dp"
+            android:paddingEnd="6dp">
 
             <FrameLayout
                 android:id="@+id/playerClose"
-                android:layout_width="52dp"
-                android:layout_height="52dp"
+                android:layout_width="48dp"
+                android:layout_height="48dp"
                 android:background="@drawable/player_cell_bg"
                 android:clickable="true"
                 android:contentDescription="@string/player_close"
                 android:focusable="true">
 
                 <ImageView
-                    android:layout_width="28dp"
-                    android:layout_height="28dp"
+                    android:layout_width="26dp"
+                    android:layout_height="26dp"
                     android:layout_gravity="center"
                     android:contentDescription="@null"
                     android:src="@drawable/player_ic_down"
-                    android:tint="#FDF8F5" />
+                    android:tint="#FFFFFF" />
             </FrameLayout>
 
             <View
@@ -50,47 +50,9 @@
                 android:layout_weight="1" />
 
             <FrameLayout
-                android:id="@+id/playerFavorite"
-                android:layout_width="52dp"
-                android:layout_height="52dp"
-                android:background="@drawable/player_cell_bg"
-                android:clickable="true"
-                android:contentDescription="@string/player_favorite"
-                android:focusable="true">
-
-                <ImageView
-                    android:id="@+id/playerFavoriteIcon"
-                    android:layout_width="26dp"
-                    android:layout_height="26dp"
-                    android:layout_gravity="center"
-                    android:contentDescription="@null"
-                    android:src="@drawable/player_ic_heart_outline"
-                    android:tint="#FDF8F5" />
-            </FrameLayout>
-
-            <FrameLayout
-                android:id="@+id/playerQueue"
-                android:layout_width="52dp"
-                android:layout_height="52dp"
-                android:background="@drawable/player_cell_bg"
-                android:clickable="true"
-                android:contentDescription="@string/player_queue"
-                android:focusable="true">
-
-                <ImageView
-                    android:id="@+id/playerQueueIcon"
-                    android:layout_width="26dp"
-                    android:layout_height="26dp"
-                    android:layout_gravity="center"
-                    android:contentDescription="@null"
-                    android:src="@drawable/player_ic_queue"
-                    android:tint="#FDF8F5" />
-            </FrameLayout>
-
-            <FrameLayout
                 android:id="@+id/playerMore"
-                android:layout_width="52dp"
-                android:layout_height="52dp"
+                android:layout_width="48dp"
+                android:layout_height="48dp"
                 android:background="@drawable/player_cell_bg"
                 android:clickable="true"
                 android:contentDescription="@string/menu_more"
@@ -98,33 +60,72 @@
 
                 <ImageView
                     android:id="@+id/playerMoreIcon"
-                    android:layout_width="26dp"
-                    android:layout_height="26dp"
+                    android:layout_width="24dp"
+                    android:layout_height="24dp"
                     android:layout_gravity="center"
                     android:contentDescription="@null"
                     android:src="@drawable/player_ic_more"
-                    android:tint="#FDF8F5" />
+                    android:tint="#FFFFFF" />
             </FrameLayout>
         </LinearLayout>
 
-        <FrameLayout
+        <!--
+            The record is as big as the width allows and sits at the top, the title right
+            under it. Height the record cannot use stays empty above the controls; on short
+            screens the record shrinks instead.
+        -->
+        <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="0dp"
             android:layout_weight="1"
-            android:paddingLeft="28dp"
-            android:paddingTop="8dp"
-            android:paddingRight="28dp"
-            android:paddingBottom="20dp">
+            android:clipChildren="false"
+            android:orientation="vertical"
+            android:paddingTop="4dp">
 
             <me.Integer.Mediaplayer.ui.widgets.VinylDiscView
                 android:id="@+id/playerVinyl"
                 android:layout_width="match_parent"
-                android:layout_height="match_parent"
-                android:layout_gravity="center"
+                android:layout_height="0dp"
+                android:layout_gravity="center_horizontal"
+                android:layout_marginLeft="28dp"
+                android:layout_marginRight="28dp"
+                android:layout_weight="1"
                 android:clickable="true"
                 android:contentDescription="@string/player_cover"
                 android:focusable="true" />
-        </FrameLayout>
+
+            <!-- Fades and slides as one unit on track changes -->
+            <LinearLayout
+                android:id="@+id/playerTextBlock"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="18dp"
+                android:gravity="center_horizontal"
+                android:orientation="vertical"
+                android:paddingLeft="28dp"
+                android:paddingRight="28dp">
+
+                <me.Integer.Mediaplayer.ui.widgets.MarqueeTextView
+                    android:id="@+id/playerTitle"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:fontFamily="sans-serif-medium"
+                    android:gravity="center_horizontal"
+                    android:textColor="#FFFFFF"
+                    android:textSize="24sp" />
+
+                <TextView
+                    android:id="@+id/playerArtist"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:ellipsize="end"
+                    android:gravity="center_horizontal"
+                    android:singleLine="true"
+                    android:textColor="#CCFFFFFF"
+                    android:textSize="16sp" />
+            </LinearLayout>
+        </LinearLayout>
 
         <include
             layout="@layout/player_panel"

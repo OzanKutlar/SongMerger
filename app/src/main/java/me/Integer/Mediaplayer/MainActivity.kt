@@ -1,6 +1,7 @@
 package me.Integer.Mediaplayer
 
 import android.Manifest
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.os.Build
@@ -42,6 +43,9 @@ class MainActivity : AppCompatActivity(), PlayerHost, Navigator, NowPlayingListe
     private lateinit var miniBar: MiniPlayerBar
     private val listeners = ArrayList<PlayerHost.Listener>()
 
+    /** A notification tap asked for the player; it opens once the activity is resumed. */
+    private var pendingOpenPlayer = false
+
     override lateinit var connection: PlayerConnection
         private set
     override var nowPlaying: NowPlaying = NowPlaying.IDLE
@@ -82,6 +86,28 @@ class MainActivity : AppCompatActivity(), PlayerHost, Navigator, NowPlayingListe
                 .commitNow()
         }
         window.decorView.post { repository.loadIfNeeded() }
+        if (savedInstanceState == null && wantsPlayer(intent)) pendingOpenPlayer = true
+    }
+
+    /** A notification tap while the app is already open brings the player to the front. */
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        if (wantsPlayer(intent)) pendingOpenPlayer = true
+    }
+
+    /** Screens can only change once the activity is resumed, so a pending request runs here. */
+    override fun onResume() {
+        super.onResume()
+        if (!pendingOpenPlayer) return
+        pendingOpenPlayer = false
+        openNowPlaying()
+    }
+
+    /** True for a notification tap, but not when Android relaunches the app from Recents. */
+    private fun wantsPlayer(intent: Intent?): Boolean {
+        if (intent == null || intent.action != ACTION_OPEN_PLAYER) return false
+        return (intent.flags and Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY) == 0
     }
 
     override fun onStart() {
@@ -239,16 +265,19 @@ class MainActivity : AppCompatActivity(), PlayerHost, Navigator, NowPlayingListe
         return false
     }
 
-    private companion object {
-        const val TAG = "MainActivity"
-        const val ART_SIZE_DP = 360
+    companion object {
+        /** The playback notification opens the app with this action to show the full-screen player. */
+        const val ACTION_OPEN_PLAYER = "me.Integer.Mediaplayer.OPEN_PLAYER"
+
+        private const val TAG = "MainActivity"
+        private const val ART_SIZE_DP = 360
 
         // Back stack names: one entry per screen, so a screen is never stacked twice.
-        const val KEY_PLAYER = "player"
-        const val KEY_QUEUE = "queue"
-        const val KEY_SETTINGS = "settings"
-        const val KEY_ARTIST = "artist:"
-        const val KEY_ALBUM = "album:"
-        const val KEY_PLAYLIST = "playlist:"
+        private const val KEY_PLAYER = "player"
+        private const val KEY_QUEUE = "queue"
+        private const val KEY_SETTINGS = "settings"
+        private const val KEY_ARTIST = "artist:"
+        private const val KEY_ALBUM = "album:"
+        private const val KEY_PLAYLIST = "playlist:"
     }
 }

@@ -19,8 +19,17 @@ internal object QueueCommands {
     /** Asks for the current mode. Every answer carries [ARG_ENABLED]. */
     const val ACTION_GET_STATE = "me.Integer.Mediaplayer.GET_STATE"
 
+    /**
+     * Loads the last saved queue, paused, when the player is empty. The answer carries
+     * [ARG_ENABLED] and [ARG_MAX_UID].
+     */
+    const val ACTION_RESTORE_LAST = "me.Integer.Mediaplayer.RESTORE_LAST"
+
     const val ARG_ENABLED = "enabled"
     const val ARG_UIDS = "uids"
+
+    /** The highest slot id in the queue, so new songs get ids above it. */
+    const val ARG_MAX_UID = "max_uid"
 
     /** Key of the per-slot id in a media item's metadata extras. */
     const val EXTRA_UID = "queue_uid"
@@ -37,6 +46,7 @@ internal object QueueCommands {
     val SET_SHUFFLE = SessionCommand(ACTION_SET_SHUFFLE, Bundle.EMPTY)
     val ADOPT_ORDER = SessionCommand(ACTION_ADOPT_ORDER, Bundle.EMPTY)
     val GET_STATE = SessionCommand(ACTION_GET_STATE, Bundle.EMPTY)
+    val RESTORE_LAST = SessionCommand(ACTION_RESTORE_LAST, Bundle.EMPTY)
 
     /** The slot id of [item], or 0 when it has none. */
     fun uidOf(item: MediaItem): Long {

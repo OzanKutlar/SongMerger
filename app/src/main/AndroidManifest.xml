@@ -40,6 +40,15 @@
             </intent-filter>
         </service>
 
+        <!-- Lets a headset or Bluetooth play button wake the app and resume the last queue -->
+        <receiver
+            android:name="androidx.media3.session.MediaButtonReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MEDIA_BUTTON" />
+            </intent-filter>
+        </receiver>
+
         <!-- Allows reading another player's active media session during playlist import -->
         <service
             android:name=".playback.MediaCaptureService"

@@ -6,11 +6,16 @@ import android.content.Intent
 import android.media.AudioAttributes as PlatformAudioAttributes
 import android.media.AudioFocusRequest
 import android.media.AudioManager
+import android.net.Uri
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
+import androidx.core.content.ContextCompat
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
+import androidx.media3.common.MediaMetadata
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
@@ -33,6 +38,10 @@ import kotlin.random.Random
  *
  * It also owns shuffle: the queue is physically reordered here, directly on the player,
  * and the pre-shuffle order is remembered here so it survives the screens being recreated.
+ *
+ * And it remembers the queue: songs, position, shuffle and repeat are saved as they change,
+ * and come back paused when the app opens, or playing when a headset or Bluetooth play
+ * button wakes the app after it was closed.
  */
 class PlaybackService : MediaSessionService() {
 
@@ -42,9 +51,23 @@ class PlaybackService : MediaSessionService() {
     private var audioManager: AudioManager? = null
     private var focusRequest: AudioFocusRequest? = null
     private var resumeOnFocusGain = false
+    private var memory: QueueMemory? = null
+    private val main = Handler(Looper.getMainLooper())
+
+    /** True once the queue changed since it was last saved; a fresh, empty service never erases the memory. */
+    private var queueDirty = false
 
     /** Blends mashup steps into each other across two ping-pong decks; idle for normal songs. */
     private var crossfader: DjCrossfader? = null
+
+    private val saveQueueTask = Runnable { saveQueueNow() }
+
+    private val savePositionTask = object : Runnable {
+        override fun run() {
+            savePositionNow()
+            if (player?.isPlaying == true) main.postDelayed(this, POSITION_SAVE_INTERVAL_MS)
+        }
+    }
 
     private val focusListener = AudioManager.OnAudioFocusChangeListener { change ->
         when (change) {
@@ -75,6 +98,24 @@ class PlaybackService : MediaSessionService() {
         }
     }
 
+    /** Saves what changed on the active deck; the idle deck only ever holds a copy. */
+    private val memoryListener = object : Player.Listener {
+        override fun onEvents(eventPlayer: Player, events: Player.Events) {
+            if (eventPlayer !== player) return
+            if (events.contains(Player.EVENT_TIMELINE_CHANGED)) scheduleQueueSave()
+            if (events.containsAny(
+                    Player.EVENT_MEDIA_ITEM_TRANSITION,
+                    Player.EVENT_POSITION_DISCONTINUITY,
+                    Player.EVENT_IS_PLAYING_CHANGED,
+                    Player.EVENT_REPEAT_MODE_CHANGED
+                )
+            ) {
+                savePositionNow()
+            }
+            if (events.contains(Player.EVENT_IS_PLAYING_CHANGED)) updatePositionTicker()
+        }
+    }
+
     private var shuffleOn = false
 
     /** Slot ids in the order to return to when shuffle is turned off. */
@@ -91,6 +132,7 @@ class PlaybackService : MediaSessionService() {
                 .add(QueueCommands.SET_SHUFFLE)
                 .add(QueueCommands.ADOPT_ORDER)
                 .add(QueueCommands.GET_STATE)
+                .add(QueueCommands.RESTORE_LAST)
                 .build()
             return MediaSession.ConnectionResult.AcceptedResultBuilder(session)
                 .setAvailableSessionCommands(commands)
@@ -119,14 +161,41 @@ class PlaybackService : MediaSessionService() {
             customCommand: SessionCommand,
             args: Bundle
         ): ListenableFuture<SessionResult> {
+            if (customCommand.customAction == QueueCommands.ACTION_RESTORE_LAST) return restoreLast()
             val handled = handleQueueCommand(customCommand.customAction, args)
             val code = if (handled) SessionResult.RESULT_SUCCESS else SessionError.ERROR_NOT_SUPPORTED
             return Futures.immediateFuture(SessionResult(code, stateExtras()))
+        }
+
+        /**
+         * A play button pressed while the app was closed (headset, Bluetooth, system media
+         * controls): Media3 asks for the queue to resume with and starts it.
+         */
+        override fun onPlaybackResumption(
+            mediaSession: MediaSession,
+            controller: MediaSession.ControllerInfo
+        ): ListenableFuture<MediaSession.MediaItemsWithStartPosition> {
+            val store = memory ?: return Futures.immediateFailedFuture(UnsupportedOperationException(NOTHING_SAVED))
+            return Futures.transform<RestoredQueue?, MediaSession.MediaItemsWithStartPosition>(
+                store.load(),
+                { restored ->
+                    val items = restored?.queue?.items?.map { toMediaItem(it) }.orEmpty()
+                    if (restored == null || items.isEmpty()) throw UnsupportedOperationException(NOTHING_SAVED)
+                    player?.let { adoptRestoredModes(it, restored) }
+                    MediaSession.MediaItemsWithStartPosition(
+                        items,
+                        restored.startIndex.coerceIn(0, items.size - 1),
+                        restored.startPositionMs
+                    )
+                },
+                ContextCompat.getMainExecutor(this@PlaybackService)
+            )
         }
     }
 
     override fun onCreate() {
         super.onCreate()
+        memory = QueueMemory(this)
         val loader = EmbeddedArtBitmapLoader(this)
         artLoader = loader
         audioManager = getSystemService(Context.AUDIO_SERVICE) as? AudioManager
@@ -134,14 +203,18 @@ class PlaybackService : MediaSessionService() {
         val deckB = buildPlayer()
         deckA.addListener(focusTriggerListener)
         deckB.addListener(focusTriggerListener)
+        deckA.addListener(memoryListener)
+        deckB.addListener(memoryListener)
         player = deckA
         crossfader = DjCrossfader(deckA, deckB) { newActive ->
             player = newActive
             session?.player = newActive
+            savePositionNow()
+            updatePositionTicker()
         }
         session = MediaSession.Builder(this, deckA)
             .setCallback(sessionCallback)
-            .setSessionActivity(openAppIntent())
+            .setSessionActivity(openPlayerIntent())
             .setBitmapLoader(loader)
             .build()
     }
@@ -152,11 +225,18 @@ class PlaybackService : MediaSessionService() {
 
     /** Swiping the app away stops the service unless music is playing. */
     override fun onTaskRemoved(rootIntent: Intent?) {
+        saveQueueNow()
+        savePositionNow()
         val current = session?.player
         if (current == null || !current.playWhenReady || current.mediaItemCount == 0) stopSelf()
     }
 
     override fun onDestroy() {
+        main.removeCallbacks(savePositionTask)
+        saveQueueNow()
+        savePositionNow()
+        memory?.shutdown()
+        memory = null
         abandonAudioFocus()
         crossfader?.release()
         crossfader = null
@@ -175,11 +255,13 @@ class PlaybackService : MediaSessionService() {
         return when (action) {
             QueueCommands.ACTION_SET_SHUFFLE -> {
                 setShuffle(args.getBoolean(QueueCommands.ARG_ENABLED, false))
+                scheduleQueueSave()
                 true
             }
             QueueCommands.ACTION_ADOPT_ORDER -> {
                 shuffleOn = args.getBoolean(QueueCommands.ARG_ENABLED, false)
                 originalOrder = args.getLongArray(QueueCommands.ARG_UIDS) ?: LongArray(0)
+                scheduleQueueSave()
                 true
             }
             QueueCommands.ACTION_GET_STATE -> true
@@ -237,6 +319,159 @@ class PlaybackService : MediaSessionService() {
         }
     }
 
+    // ------------------------------------------------------------------ memory
+
+    private fun scheduleQueueSave() {
+        queueDirty = true
+        main.removeCallbacks(saveQueueTask)
+        main.postDelayed(saveQueueTask, QUEUE_SAVE_DELAY_MS)
+    }
+
+    /** Hands the queue to the background writer; an emptied queue forgets the old one. */
+    private fun saveQueueNow() {
+        main.removeCallbacks(saveQueueTask)
+        if (!queueDirty) return
+        val exo = player ?: return
+        val store = memory ?: return
+        queueDirty = false
+        val count = minOf(exo.mediaItemCount, QueueCodec.MAX_ITEMS)
+        val items = ArrayList<SavedItem>(count)
+        for (index in 0 until count) {
+            toSaved(exo.getMediaItemAt(index))?.let { items.add(it) }
+        }
+        if (items.isEmpty()) {
+            store.clear()
+            return
+        }
+        val order = if (shuffleOn) originalOrder.toList() else emptyList()
+        store.saveQueue(SavedQueue(items, shuffleOn, order))
+        savePositionNow()
+    }
+
+    private fun savePositionNow() {
+        val exo = player ?: return
+        val store = memory ?: return
+        val item = exo.currentMediaItem ?: return
+        store.savePosition(
+            SavedPosition(
+                index = exo.currentMediaItemIndex,
+                uid = QueueCommands.uidOf(item),
+                uri = item.mediaId,
+                positionMs = maxOf(0L, exo.currentPosition),
+                repeatMode = exo.repeatMode
+            )
+        )
+    }
+
+    /** While music plays, the position is saved every few seconds as well. */
+    private fun updatePositionTicker() {
+        main.removeCallbacks(savePositionTask)
+        if (player?.isPlaying == true) main.postDelayed(savePositionTask, POSITION_SAVE_INTERVAL_MS)
+    }
+
+    /** Puts the saved queue back, paused, unless something is already queued. */
+    private fun restoreLast(): ListenableFuture<SessionResult> {
+        val store = memory
+        val exo = player
+        if (store == null || exo == null || exo.mediaItemCount > 0) {
+            return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS, restoreExtras()))
+        }
+        return Futures.transform<RestoredQueue?, SessionResult>(
+            store.load(),
+            { restored ->
+                val live = player
+                if (restored != null && live != null && live.mediaItemCount == 0) loadPaused(live, restored)
+                SessionResult(SessionResult.RESULT_SUCCESS, restoreExtras())
+            },
+            ContextCompat.getMainExecutor(this)
+        )
+    }
+
+    private fun loadPaused(exo: ExoPlayer, restored: RestoredQueue) {
+        val items = restored.queue.items.map { toMediaItem(it) }
+        if (items.isEmpty()) return
+        adoptRestoredModes(exo, restored)
+        try {
+            exo.playWhenReady = false
+            exo.setMediaItems(items, restored.startIndex.coerceIn(0, items.size - 1), restored.startPositionMs)
+            exo.prepare()
+        } catch (e: RuntimeException) {
+            Log.e(TAG, "cannot restore the last queue", e)
+        }
+    }
+
+    private fun adoptRestoredModes(exo: ExoPlayer, restored: RestoredQueue) {
+        shuffleOn = restored.queue.shuffleOn
+        originalOrder = if (shuffleOn) restored.queue.originalOrder.toLongArray() else LongArray(0)
+        exo.repeatMode = restored.repeatMode
+    }
+
+    private fun restoreExtras(): Bundle {
+        val extras = stateExtras()
+        player?.let { extras.putLong(QueueCommands.ARG_MAX_UID, highestUid(it)) }
+        return extras
+    }
+
+    private fun highestUid(exo: ExoPlayer): Long {
+        val count = minOf(exo.mediaItemCount, QueueCodec.MAX_ITEMS)
+        var highest = 0L
+        for (index in 0 until count) {
+            highest = maxOf(highest, QueueCommands.uidOf(exo.getMediaItemAt(index)))
+        }
+        return highest
+    }
+
+    /** @return null for anything that is not a song in the library */
+    private fun toSaved(item: MediaItem): SavedItem? {
+        if (!item.mediaId.startsWith(CONTENT_PREFIX)) return null
+        val meta = item.mediaMetadata
+        val clip = item.clippingConfiguration
+        val end = if (clip.endPositionMs == C.TIME_END_OF_SOURCE) SavedItem.TO_END else clip.endPositionMs
+        return SavedItem(
+            uri = item.mediaId,
+            title = meta.title?.toString().orEmpty(),
+            artist = meta.artist?.toString().orEmpty(),
+            album = meta.albumTitle?.toString().orEmpty(),
+            uid = QueueCommands.uidOf(item),
+            clipStartMs = clip.startPositionMs,
+            clipEndMs = end,
+            crossfadeMs = QueueCommands.crossfadeOf(item),
+            tempoRatio = QueueCommands.tempoRatioOf(item)
+        )
+    }
+
+    /** The same item the app builds, so mashup steps keep their part of the song and their blend. */
+    private fun toMediaItem(saved: SavedItem): MediaItem {
+        val extras = Bundle().apply {
+            putLong(QueueCommands.EXTRA_UID, saved.uid)
+            if (saved.crossfadeMs > 0L || saved.tempoRatio != 1f) {
+                putLong(QueueCommands.EXTRA_CROSSFADE_MS, saved.crossfadeMs)
+                putFloat(QueueCommands.EXTRA_TEMPO_RATIO, saved.tempoRatio)
+            }
+        }
+        val metadata = MediaMetadata.Builder()
+            .setTitle(saved.title)
+            .setArtist(saved.artist.ifEmpty { null })
+            .setAlbumTitle(saved.album.ifEmpty { null })
+            .setArtworkUri(Uri.parse(saved.uri))
+            .setExtras(extras)
+            .build()
+        val builder = MediaItem.Builder()
+            .setMediaId(saved.uri)
+            .setUri(saved.uri)
+            .setMediaMetadata(metadata)
+        if (saved.clipStartMs > 0L || saved.clipEndMs != SavedItem.TO_END) {
+            val end = if (saved.clipEndMs == SavedItem.TO_END) C.TIME_END_OF_SOURCE else saved.clipEndMs
+            builder.setClippingConfiguration(
+                MediaItem.ClippingConfiguration.Builder()
+                    .setStartPositionMs(saved.clipStartMs)
+                    .setEndPositionMs(end)
+                    .build()
+            )
+        }
+        return builder.build()
+    }
+
     // ------------------------------------------------------------------ setup
 
     private fun buildPlayer(): ExoPlayer {
@@ -278,15 +513,21 @@ class PlaybackService : MediaSessionService() {
         focusRequest?.let { manager.abandonAudioFocusRequest(it) }
     }
 
-    /** Tapping the notification opens the app. */
-    private fun openAppIntent(): PendingIntent {
-        val intent = Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP)
+    /** Tapping the notification opens the app straight on the full-screen player. */
+    private fun openPlayerIntent(): PendingIntent {
+        val intent = Intent(this, MainActivity::class.java)
+            .setAction(MainActivity.ACTION_OPEN_PLAYER)
+            .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP)
         val flags = PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
-        return PendingIntent.getActivity(this, 0, intent, flags)
+        return PendingIntent.getActivity(this, OPEN_PLAYER_REQUEST, intent, flags)
     }
 
     private companion object {
         const val TAG = "PlaybackService"
         const val CONTENT_PREFIX = "content://"
+        const val NOTHING_SAVED = "no saved queue to resume"
+        const val QUEUE_SAVE_DELAY_MS = 1000L
+        const val POSITION_SAVE_INTERVAL_MS = 5000L
+        const val OPEN_PLAYER_REQUEST = 1
     }
 }

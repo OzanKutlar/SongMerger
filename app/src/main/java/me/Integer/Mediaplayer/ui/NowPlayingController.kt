@@ -31,7 +31,7 @@ import kotlin.math.abs
 /**
  * Drives the full-screen player, ported from the car HUD media panel.
  *
- * Motion: press feedback on every control, optimistic play/pause with a morph and pulse,
+ * Motion: press feedback on every control, optimistic play/pause with an icon morph,
  * directional text transitions, a record carousel and a progress glide on track changes,
  * and hold-and-turn scrubbing on the disc. Every animation is settled in [stop], so
  * nothing runs in the background. Main thread only.
@@ -74,7 +74,8 @@ class NowPlayingController(
     private val playCell: View = root.findViewById(R.id.playerPlay)
     private val playButton: View = root.findViewById(R.id.playerPlayButton)
     private val playIcon: ImageView = root.findViewById(R.id.playerPlayIcon)
-    private val playPulse: View = root.findViewById(R.id.playerPlayPulse)
+    private val addCell: View = root.findViewById(R.id.playerAdd)
+    private val addIcon: View = root.findViewById(R.id.playerAddIcon)
     private val nextCell: View = root.findViewById(R.id.playerNext)
     private val nextIcon: View = root.findViewById(R.id.playerNextIcon)
     private val repeatCell: View = root.findViewById(R.id.playerRepeat)
@@ -215,6 +216,7 @@ class NowPlayingController(
         PressFeedback.attach(favoriteCell, favoriteIcon)
         PressFeedback.attach(queueCell, queueIcon)
         PressFeedback.attach(moreCell, moreIcon)
+        PressFeedback.attach(addCell, addIcon)
         PressFeedback.attach(shuffleCell, shuffleIcon)
         PressFeedback.attach(previousCell, previousIcon)
         PressFeedback.attach(playCell, playButton)
@@ -255,7 +257,6 @@ class NowPlayingController(
         val now = SystemClock.elapsedRealtime()
         optimisticPlaying = target
         optimisticUntil = now + OPTIMISTIC_WINDOW_MS
-        pulsePlay()
         renderPlayState(current, now)
         if (target) host.connection.play() else host.connection.pause()
     }
@@ -486,7 +487,7 @@ class NowPlayingController(
     private fun setSeekHighlight(active: Boolean) {
         val thumb = if (active) thumbPressed else thumbNormal
         if (thumb != null) seekBar.thumb = thumb
-        elapsedView.setTextColor(if (active) COLOR_ON else COLOR_TIME)
+        elapsedView.setTextColor(if (active) COLOR_TIME_ACTIVE else COLOR_TIME)
     }
 
     // ------------------------------------------------------------------ rendering
@@ -520,7 +521,9 @@ class NowPlayingController(
         vinyl.setExpanded(false)
         vinyl.setArt(null)
         ambience.setArt(null)
+        ambience.setDrifting(false)
         setUsable(favoriteCell, false)
+        setUsable(addCell, false)
         setUsable(queueCell, false)
         setUsable(moreCell, false)
         setUsable(previousCell, false)
@@ -589,6 +592,7 @@ class NowPlayingController(
 
     private fun renderButtons(current: NowPlaying) {
         setUsable(favoriteCell, true)
+        setUsable(addCell, true)
         setUsable(queueCell, true)
         setUsable(moreCell, true)
         setUsable(previousCell, true)
@@ -616,6 +620,7 @@ class NowPlayingController(
         renderPlayIcon(wantsPlay)
         vinyl.setPlaying(if (optimistic) optimisticPlaying else current.clockRunning)
         vinyl.setExpanded(wantsPlay)
+        ambience.setDrifting(if (optimistic) optimisticPlaying else current.clockRunning)
     }
 
     private fun renderPlayIcon(playing: Boolean) {
@@ -709,15 +714,6 @@ class NowPlayingController(
 
     // ------------------------------------------------------------------ small animations
 
-    private fun pulsePlay() {
-        playPulse.animate().cancel()
-        playPulse.scaleX = 1f
-        playPulse.scaleY = 1f
-        playPulse.alpha = PULSE_START_ALPHA
-        playPulse.animate().scaleX(PULSE_END_SCALE).scaleY(PULSE_END_SCALE).alpha(0f)
-            .setDuration(PULSE_MS).setInterpolator(DECELERATE).start()
-    }
-
     private fun nudge(view: View, direction: Int) {
         view.animate().translationX(direction * NUDGE_DP * density)
             .setDuration(NUDGE_HALF_MS).setInterpolator(DECELERATE)
@@ -761,19 +757,18 @@ class NowPlayingController(
         shuffleColorAnimator = null
         if (shuffleColorInitialised) applyShuffleColor(shuffleTargetColor)
         if (playIconInitialised) resetPlayIcon()
-        playPulse.animate().cancel()
-        playPulse.alpha = 0f
-        for (control in listOf(favoriteCell, queueCell, moreCell, shuffleCell, previousCell, playCell, nextCell, repeatCell, seekBar)) {
+        for (control in listOf(favoriteCell, queueCell, moreCell, addCell, shuffleCell, previousCell, playCell, nextCell, repeatCell, seekBar)) {
             settleTransform(control)
             control.alpha = if (control.isEnabled) 1f else DISABLED_ALPHA
         }
-        for (icon in listOf(favoriteIcon, queueIcon, moreIcon, shuffleIcon, previousIcon, nextIcon, repeatIcon, playButton, vinyl)) {
+        for (icon in listOf(favoriteIcon, queueIcon, moreIcon, addIcon, shuffleIcon, previousIcon, nextIcon, repeatIcon, playButton, vinyl)) {
             settleTransform(icon)
         }
         if (enterPendingSince != 0L && host.isArtResolved) vinyl.setArt(host.currentArt)
         enterPendingSince = 0L
         vinyl.showInPlace()
         vinyl.setPlaying(false)
+        ambience.setDrifting(false)
         discExitAt = 0L
         optimisticUntil = 0L
         setSeekHighlight(false)
@@ -807,7 +802,6 @@ class NowPlayingController(
         const val ART_WAIT_MS = 600L
         const val ALPHA_FADE_MS = 200L
         const val MORPH_HALF_MS = 90L
-        const val PULSE_MS = 350L
         const val NUDGE_HALF_MS = 100L
         const val SHUFFLE_COLOR_MS = 250L
         const val HOP_UP_MS = 110L
@@ -824,13 +818,12 @@ class NowPlayingController(
         const val NUDGE_DP = 6f
         const val HOP_DP = 4f
         const val MORPH_SCALE = 0.4f
-        const val PULSE_START_ALPHA = 0.8f
-        const val PULSE_END_SCALE = 1.35f
         const val DISABLED_ALPHA = 0.35f
 
         const val COLOR_ON = 0xFFFF6D00.toInt()
         const val COLOR_IDLE = 0xFFFDF8F5.toInt()
-        const val COLOR_TIME = 0xFFE6D7CF.toInt()
+        const val COLOR_TIME = 0xB3FFFFFF.toInt()
+        const val COLOR_TIME_ACTIVE = 0xFFFFFFFF.toInt()
         const val NO_VALUE = Long.MIN_VALUE
         const val NO_MODE = -1
         const val NO_TIME = "--:--"

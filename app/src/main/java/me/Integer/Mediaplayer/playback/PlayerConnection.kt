@@ -93,6 +93,7 @@ class PlayerConnection(context: Context, private val listener: NowPlayingListene
         // Songs already queued keep their ids, so new ones must start above them.
         nextUid = maxOf(nextUid, highestUid(connected) + 1L)
         requestShuffleState(connected)
+        if (connected.mediaItemCount == 0) requestRestore(connected)
         publish()
     }
 
@@ -132,6 +133,25 @@ class PlayerConnection(context: Context, private val listener: NowPlayingListene
         future.addListener({
             val result = resultOf(future, "reading the shuffle state")
             if (result != null && controller === player) applyShuffleState(result)
+        }, ContextCompat.getMainExecutor(appContext))
+    }
+
+    /**
+     * An empty service gets the last saved queue back, paused. The answer carries the shuffle
+     * state and the highest slot id, so songs added afterwards get fresh ids.
+     */
+    private fun requestRestore(player: MediaController) {
+        val future = player.sendCustomCommand(QueueCommands.RESTORE_LAST, Bundle.EMPTY)
+        future.addListener({
+            val result = resultOf(future, "restoring the last queue")
+            if (result == null || controller !== player) return@addListener
+            if (result.resultCode != SessionResult.RESULT_SUCCESS) {
+                Log.w(TAG, "restoring the last queue was refused with code ${result.resultCode}")
+                return@addListener
+            }
+            nextUid = maxOf(nextUid, result.extras.getLong(QueueCommands.ARG_MAX_UID, 0L) + 1L)
+            applyShuffleState(result)
+            publish()
         }, ContextCompat.getMainExecutor(appContext))
     }
 
