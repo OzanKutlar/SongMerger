@@ -89,7 +89,7 @@ class ListeningHistoryStore(context: Context, private val onChanged: () -> Unit)
     ): FavoritesShowcase {
         val snapshot = snapshotEntries()
         val tracksByUri = allTracks.associateBy { it.uri }
-        val pinnedIds = longArrayOf(ID_FAVORITES, ID_MOST_LISTENED_ALL, ID_MOST_LISTENED_WEEK, ID_MOST_LISTENED_MONTH)
+        val pinnedIds = listOf(ID_FAVORITES, ID_MOST_LISTENED_ALL, ID_MOST_LISTENED_WEEK, ID_MOST_LISTENED_MONTH)
         val pinned = pinnedIds.mapNotNull { buildPinnedDetails(it, favoriteTracks, snapshot, tracksByUri, nowMs)?.playlist }
         return FavoritesShowcase(
             pinned = pinned,
