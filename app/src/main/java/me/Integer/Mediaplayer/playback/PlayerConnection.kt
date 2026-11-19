@@ -360,22 +360,21 @@ class PlayerConnection(
     }
 
     /** Inserts a song right after the current one; starts playback when the queue was empty. */
-    fun playNext(track: Track, artist: String) {
-        val player = controller ?: return
-        if (PlayerSettings(appContext).preventDuplicatesInQueue && isTrackInQueue(player, track.uri)) return
-        val item = toItem(track, artist)
-        val wasEmpty = player.mediaItemCount == 0
-        val insertAt = if (wasEmpty) 0 else (player.currentMediaItemIndex + 1).coerceAtMost(player.mediaItemCount)
-        player.addMediaItem(insertAt, item)
-        if (wasEmpty) startFresh(player) else publish()
-    }
+    fun playNext(track: Track, artist: String) = enqueue(track, artist, next = true)
 
-    fun addToQueue(track: Track, artist: String) {
+    fun addToQueue(track: Track, artist: String) = enqueue(track, artist, next = false)
+
+    private fun enqueue(track: Track, artist: String, next: Boolean) {
         val player = controller ?: return
         if (PlayerSettings(appContext).preventDuplicatesInQueue && isTrackInQueue(player, track.uri)) return
         val item = toItem(track, artist)
         val wasEmpty = player.mediaItemCount == 0
-        player.addMediaItem(item)
+        if (next) {
+            val insertAt = if (wasEmpty) 0 else (player.currentMediaItemIndex + 1).coerceAtMost(player.mediaItemCount)
+            player.addMediaItem(insertAt, item)
+        } else {
+            player.addMediaItem(item)
+        }
         if (wasEmpty) startFresh(player) else publish()
     }
 
@@ -438,39 +437,20 @@ class PlayerConnection(
     }
 
     private fun toItemWithUid(track: Track, artist: String, uid: Long, segment: MixSegment? = null): MediaItem {
-        val extras = Bundle().apply {
-            putLong(QueueCommands.EXTRA_UID, uid)
-            if (segment != null) {
-                putLong(QueueCommands.EXTRA_CROSSFADE_MS, segment.crossfadeMs)
-                putFloat(QueueCommands.EXTRA_TEMPO_RATIO, segment.tempoRatio)
-                if (segment.gainDb != 0f) putFloat(QueueCommands.EXTRA_GAIN_DB, segment.gainDb)
-            } else {
-                val fade = songCrossfadeMs().coerceIn(0L, QueueCommands.MAX_CROSSFADE_MS)
-                if (fade > 0L) putLong(QueueCommands.EXTRA_CROSSFADE_MS, fade)
-            }
-        }
-        val metadata = MediaMetadata.Builder()
-            .setTitle(track.title)
-            .setArtist(artist.ifEmpty { null })
-            .setAlbumTitle(track.album.ifEmpty { null })
-            .setArtworkUri(Uri.parse(track.uri))
-            .setExtras(extras)
-            .build()
-        val builder = MediaItem.Builder()
-            .setMediaId(track.uri)
-            .setUri(track.uri)
-            .setMediaMetadata(metadata)
-        if (segment != null) builder.setClippingConfiguration(clippingOf(segment))
-        return builder.build()
-    }
-
-    /** The player plays only this part of the song; positions are relative to its start. */
-    private fun clippingOf(segment: MixSegment): MediaItem.ClippingConfiguration {
-        val end = if (segment.playsToEnd) C.TIME_END_OF_SOURCE else segment.endMs
-        return MediaItem.ClippingConfiguration.Builder()
-            .setStartPositionMs(segment.startMs)
-            .setEndPositionMs(end)
-            .build()
+        val fade = segment?.crossfadeMs ?: songCrossfadeMs().coerceIn(0L, QueueCommands.MAX_CROSSFADE_MS)
+        val endMs = if (segment == null || segment.playsToEnd) SavedItem.TO_END else segment.endMs
+        return QueueCommands.buildMediaItem(
+            uri = track.uri,
+            title = track.title,
+            artist = artist,
+            album = track.album,
+            uid = uid,
+            clipStartMs = segment?.startMs ?: 0L,
+            clipEndMs = endMs,
+            crossfadeMs = fade,
+            tempoRatio = segment?.tempoRatio ?: 1f,
+            gainDb = segment?.gainDb ?: 0f
+        )
     }
 
     // ------------------------------------------------------------------ transport & shuffle

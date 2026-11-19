@@ -367,21 +367,26 @@ class LibraryFragment : Fragment(R.layout.fragment_library), LibraryRepository.L
 
     private fun showSortMenu(anchor: View) {
         when (activeTab) {
-            TAB_ARTISTS -> showArtistSortMenu(anchor)
-            TAB_ALBUMS -> showAlbumSortMenu(anchor)
-            else -> showTrackSortMenu(anchor)
+            TAB_ARTISTS -> showSortPopup(anchor, ARTIST_SORT_LABELS, repository.settings.artistSort) {
+                repository.settings.artistSort = it
+            }
+            TAB_ALBUMS -> showSortPopup(anchor, ALBUM_SORT_LABELS, repository.settings.albumSort) {
+                repository.settings.albumSort = it
+            }
+            else -> showSortPopup(anchor, TRACK_SORT_LABELS, repository.settings.trackSort) {
+                repository.settings.trackSort = it
+            }
         }
     }
 
-    private fun showAlbumSortMenu(anchor: View) {
-        val current = repository.settings.albumSort
+    private fun showSortPopup(anchor: View, labels: IntArray, current: Int, onPick: (Int) -> Unit) {
         val popup = PopupMenu(requireContext(), anchor)
-        for ((mode, label) in ALBUM_SORT_LABELS.withIndex()) {
+        for ((mode, label) in labels.withIndex()) {
             popup.menu.add(0, mode, mode, label).isChecked = mode == current
         }
         popup.menu.setGroupCheckable(0, true, true)
         popup.setOnMenuItemClickListener { item ->
-            repository.settings.albumSort = item.itemId
+            onPick(item.itemId)
             refresh()
             replayRows()
             true
@@ -431,37 +436,7 @@ class LibraryFragment : Fragment(R.layout.fragment_library), LibraryRepository.L
         }
     }
 
-    private fun showTrackSortMenu(anchor: View) {
-        val current = repository.settings.trackSort
-        val popup = PopupMenu(requireContext(), anchor)
-        for ((mode, label) in TRACK_SORT_LABELS.withIndex()) {
-            popup.menu.add(0, mode, mode, label).isChecked = mode == current
-        }
-        popup.menu.setGroupCheckable(0, true, true)
-        popup.setOnMenuItemClickListener { item ->
-            repository.settings.trackSort = item.itemId
-            refresh()
-            replayRows()
-            true
-        }
-        popup.show()
-    }
 
-    private fun showArtistSortMenu(anchor: View) {
-        val current = repository.settings.artistSort
-        val popup = PopupMenu(requireContext(), anchor)
-        for ((mode, label) in ARTIST_SORT_LABELS.withIndex()) {
-            popup.menu.add(0, mode, mode, label).isChecked = mode == current
-        }
-        popup.menu.setGroupCheckable(0, true, true)
-        popup.setOnMenuItemClickListener { item ->
-            repository.settings.artistSort = item.itemId
-            refresh()
-            replayRows()
-            true
-        }
-        popup.show()
-    }
 
     private fun selectTab(tab: Int) {
         if (activeTab == tab) return

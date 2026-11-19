@@ -67,19 +67,9 @@ object PlaylistDialogs {
 
     /** Lets the user pick the playlist a song goes into, or create a new one for it. */
     fun addTrack(context: Context, repository: LibraryRepository, track: Track) {
-        val playlists = repository.playlists.all()
-        val labels = arrayOf(context.getString(R.string.playlist_new_item)) + playlists.map { it.name }
-        AlertDialog.Builder(context)
-            .setTitle(R.string.menu_add_playlist)
-            .setItems(labels) { _, which ->
-                if (which == 0) {
-                    create(context, repository) { created -> addTo(context, repository, created, track) }
-                } else {
-                    playlists.getOrNull(which - 1)?.let { addTo(context, repository, it, track) }
-                }
-            }
-            .setNegativeButton(android.R.string.cancel, null)
-            .show()
+        pickPlaylist(context, repository, R.string.menu_add_playlist) { chosen ->
+            addTo(context, repository, chosen, track)
+        }
     }
 
     /**
@@ -97,15 +87,26 @@ object PlaylistDialogs {
             toast(context, context.getString(R.string.queue_nothing_to_save))
             return
         }
+        pickPlaylist(context, repository, titleRes) { chosen ->
+            addAllTo(context, repository, chosen, uris)
+        }
+    }
+
+    private fun pickPlaylist(
+        context: Context,
+        repository: LibraryRepository,
+        titleRes: Int,
+        onChosen: (Playlist) -> Unit
+    ) {
         val playlists = repository.playlists.all()
         val labels = arrayOf(context.getString(R.string.playlist_new_item)) + playlists.map { it.name }
         AlertDialog.Builder(context)
             .setTitle(titleRes)
             .setItems(labels) { _, which ->
                 if (which == 0) {
-                    create(context, repository) { created -> addAllTo(context, repository, created, uris) }
+                    create(context, repository, onChosen)
                 } else {
-                    playlists.getOrNull(which - 1)?.let { addAllTo(context, repository, it, uris) }
+                    playlists.getOrNull(which - 1)?.let(onChosen)
                 }
             }
             .setNegativeButton(android.R.string.cancel, null)

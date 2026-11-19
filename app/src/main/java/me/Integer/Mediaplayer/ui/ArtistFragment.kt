@@ -12,27 +12,30 @@ import me.Integer.Mediaplayer.library.Track
 import me.Integer.Mediaplayer.ui.widgets.FastScroller
 import me.Integer.Mediaplayer.ui.widgets.PressFeedback
 
-/** One artist and every song they appear on, alone or with others. */
-class ArtistFragment : Fragment(R.layout.fragment_artist), LibraryRepository.Listener, PlayerHost.Listener {
+/**
+ * Base fragment for a named collection of songs (an artist or an album) using `fragment_artist.xml`.
+ */
+abstract class TrackCollectionFragment : Fragment(R.layout.fragment_artist),
+    LibraryRepository.Listener, PlayerHost.Listener {
 
-    private lateinit var repository: LibraryRepository
+    protected lateinit var repository: LibraryRepository
     private lateinit var host: PlayerHost
     private lateinit var adapter: TrackAdapter
     private lateinit var countView: TextView
     private lateinit var list: RecyclerView
-    private var artistName = ""
     private var tracks: List<Track> = emptyList()
     private val selection = TrackSelection()
     private lateinit var selectionController: TrackSelectionController
+
+    protected abstract fun resolveTitle(): String
+    protected abstract fun loadTracks(): List<Track>
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
         repository = LibraryRepository.get(requireContext())
         host = requireActivity() as PlayerHost
-        artistName = arguments?.getString(ARG_NAME).orEmpty()
         countView = view.findViewById(R.id.artistSongCount)
-        view.findViewById<TextView>(R.id.artistTitle).text =
-            artistName.ifEmpty { getString(R.string.library_unknown_artist) }
+        view.findViewById<TextView>(R.id.artistTitle).text = resolveTitle()
         view.findViewById<View>(R.id.artistBack).setOnClickListener { (requireActivity() as Navigator).goBack() }
         wireButtons(view)
         adapter = TrackAdapter(
@@ -76,9 +79,7 @@ class ArtistFragment : Fragment(R.layout.fragment_artist), LibraryRepository.Lis
         super.onStop()
     }
 
-    override fun onLibraryChanged() {
-        refresh()
-    }
+    override fun onLibraryChanged() = refresh()
 
     override fun onScanState(state: LibraryRepository.ScanState) = Unit
 
@@ -87,16 +88,33 @@ class ArtistFragment : Fragment(R.layout.fragment_artist), LibraryRepository.Lis
     }
 
     private fun refresh() {
-        val artist = repository.artists().firstOrNull { it.name.equals(artistName, ignoreCase = true) }
-        tracks = artist?.tracks ?: emptyList()
+        tracks = loadTracks()
         adapter.submit(tracks)
         selectionController.onRowsChanged()
         countView.text = resources.getQuantityString(R.plurals.library_song_count, tracks.size, tracks.size)
     }
 
+    private companion object {
+        const val ROUND_PRESS_SCALE = 0.9f
+    }
+}
+
+/** One artist and every song they appear on, alone or with others. */
+class ArtistFragment : TrackCollectionFragment() {
+
+    private val artistName: String
+        get() = arguments?.getString(ARG_NAME).orEmpty()
+
+    override fun resolveTitle(): String {
+        return artistName.ifEmpty { getString(R.string.library_unknown_artist) }
+    }
+
+    override fun loadTracks(): List<Track> {
+        return repository.artists().firstOrNull { it.name.equals(artistName, ignoreCase = true) }?.tracks.orEmpty()
+    }
+
     companion object {
         private const val ARG_NAME = "artist_name"
-        private const val ROUND_PRESS_SCALE = 0.9f
 
         fun create(name: String): ArtistFragment {
             return ArtistFragment().apply {

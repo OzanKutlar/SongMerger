@@ -89,36 +89,11 @@ class ListeningHistoryStore(context: Context, private val onChanged: () -> Unit)
     ): FavoritesShowcase {
         val snapshot = snapshotEntries()
         val tracksByUri = allTracks.associateBy { it.uri }
-        val favUris = favoriteTracks.map { it.uri }
-
-        val favoritesPl = Playlist(
-            id = ID_FAVORITES,
-            name = appContext.getString(R.string.sys_playlist_favorites),
-            trackUris = favUris
-        )
-        val lifetimeRanked = rankLifetime(snapshot, tracksByUri, TOP_LIMIT)
-        val mostListenedPl = Playlist(
-            id = ID_MOST_LISTENED_ALL,
-            name = appContext.getString(R.string.sys_playlist_most_listened),
-            trackUris = lifetimeRanked.map { it.uri }
-        )
-        val weekRanked = rankWindow(snapshot, tracksByUri, nowMs - WEEK_MS, nowMs, TOP_LIMIT)
-        val weekPl = Playlist(
-            id = ID_MOST_LISTENED_WEEK,
-            name = appContext.getString(R.string.sys_playlist_most_week),
-            trackUris = weekRanked.map { it.uri }
-        )
-        val monthRanked = rankWindow(snapshot, tracksByUri, nowMs - MONTH_MS, nowMs, TOP_LIMIT)
-        val monthPl = Playlist(
-            id = ID_MOST_LISTENED_MONTH,
-            name = appContext.getString(R.string.sys_playlist_most_month),
-            trackUris = monthRanked.map { it.uri }
-        )
-
-        val recaps = buildRecapPlaylists(snapshot, tracksByUri, nowMs)
+        val pinnedIds = longArrayOf(ID_FAVORITES, ID_MOST_LISTENED_ALL, ID_MOST_LISTENED_WEEK, ID_MOST_LISTENED_MONTH)
+        val pinned = pinnedIds.mapNotNull { buildPinnedDetails(it, favoriteTracks, snapshot, tracksByUri, nowMs)?.playlist }
         return FavoritesShowcase(
-            pinned = listOf(favoritesPl, mostListenedPl, weekPl, monthPl),
-            recaps = recaps
+            pinned = pinned,
+            recaps = buildRecapPlaylists(snapshot, tracksByUri, nowMs)
         )
     }
 
@@ -132,56 +107,38 @@ class ListeningHistoryStore(context: Context, private val onChanged: () -> Unit)
         if (id >= 0L) return null
         val snapshot = snapshotEntries()
         val tracksByUri = allTracks.associateBy { it.uri }
-        return when (id) {
-            ID_FAVORITES -> {
-                val uris = favoriteTracks.map { it.uri }
-                val stats = HashMap<String, TrackListenStats>()
-                for (track in favoriteTracks) {
-                    val count = snapshot[track.uri]?.lifetimeCount ?: 0
-                    if (count > 0) {
-                        stats[track.uri] = TrackListenStats(track.uri, count, count.toLong() * effectiveDurationMs(track))
-                    }
+        return buildPinnedDetails(id, favoriteTracks, snapshot, tracksByUri, nowMs)
+            ?: resolveRecapById(id, snapshot, tracksByUri)
+    }
+
+    private fun buildPinnedDetails(
+        id: Long,
+        favoriteTracks: List<Track>,
+        snapshot: Map<String, Entry>,
+        tracksByUri: Map<String, Track>,
+        nowMs: Long
+    ): SystemPlaylistDetails? {
+        if (id == ID_FAVORITES) {
+            val stats = HashMap<String, TrackListenStats>()
+            for (track in favoriteTracks) {
+                val count = snapshot[track.uri]?.lifetimeCount ?: 0
+                if (count > 0) {
+                    stats[track.uri] = TrackListenStats(track.uri, count, count.toLong() * effectiveDurationMs(track))
                 }
-                SystemPlaylistDetails(
-                    Playlist(ID_FAVORITES, appContext.getString(R.string.sys_playlist_favorites), uris),
-                    stats
-                )
             }
-            ID_MOST_LISTENED_ALL -> {
-                val ranked = rankLifetime(snapshot, tracksByUri, TOP_LIMIT)
-                SystemPlaylistDetails(
-                    Playlist(
-                        ID_MOST_LISTENED_ALL,
-                        appContext.getString(R.string.sys_playlist_most_listened),
-                        ranked.map { it.uri }
-                    ),
-                    ranked.associateBy { it.uri }
-                )
-            }
-            ID_MOST_LISTENED_WEEK -> {
-                val ranked = rankWindow(snapshot, tracksByUri, nowMs - WEEK_MS, nowMs, TOP_LIMIT)
-                SystemPlaylistDetails(
-                    Playlist(
-                        ID_MOST_LISTENED_WEEK,
-                        appContext.getString(R.string.sys_playlist_most_week),
-                        ranked.map { it.uri }
-                    ),
-                    ranked.associateBy { it.uri }
-                )
-            }
-            ID_MOST_LISTENED_MONTH -> {
-                val ranked = rankWindow(snapshot, tracksByUri, nowMs - MONTH_MS, nowMs, TOP_LIMIT)
-                SystemPlaylistDetails(
-                    Playlist(
-                        ID_MOST_LISTENED_MONTH,
-                        appContext.getString(R.string.sys_playlist_most_month),
-                        ranked.map { it.uri }
-                    ),
-                    ranked.associateBy { it.uri }
-                )
-            }
-            else -> resolveRecapById(id, snapshot, tracksByUri)
+            val playlist = Playlist(ID_FAVORITES, appContext.getString(R.string.sys_playlist_favorites), favoriteTracks.map { it.uri })
+            return SystemPlaylistDetails(playlist, stats)
         }
+        val (titleRes, ranked) = when (id) {
+            ID_MOST_LISTENED_ALL -> R.string.sys_playlist_most_listened to rankLifetime(snapshot, tracksByUri, TOP_LIMIT)
+            ID_MOST_LISTENED_WEEK -> R.string.sys_playlist_most_week to rankWindow(snapshot, tracksByUri, nowMs - WEEK_MS, nowMs, TOP_LIMIT)
+            ID_MOST_LISTENED_MONTH -> R.string.sys_playlist_most_month to rankWindow(snapshot, tracksByUri, nowMs - MONTH_MS, nowMs, TOP_LIMIT)
+            else -> return null
+        }
+        return SystemPlaylistDetails(
+            Playlist(id, appContext.getString(titleRes), ranked.map { it.uri }),
+            ranked.associateBy { it.uri }
+        )
     }
 
     private fun resolveRecapById(
@@ -460,19 +417,7 @@ class ListeningHistoryStore(context: Context, private val onChanged: () -> Unit)
             tracksByUri: Map<String, Track>,
             limit: Int = TOP_LIMIT
         ): List<TrackListenStats> {
-            val stats = ArrayList<TrackListenStats>()
-            for ((uri, entry) in entries) {
-                if (entry.lifetimeCount <= 0) continue
-                val track = tracksByUri[uri] ?: continue
-                val totalMs = entry.lifetimeCount.toLong() * effectiveDurationMs(track)
-                stats.add(TrackListenStats(uri, entry.lifetimeCount, totalMs))
-            }
-            stats.sortWith(
-                compareByDescending<TrackListenStats> { it.listenedMs }
-                    .thenByDescending { it.playCount }
-                    .thenBy { tracksByUri[it.uri]?.title.orEmpty() }
-            )
-            return stats.take(limit)
+            return rankByCount(entries, tracksByUri, limit) { it.lifetimeCount }
         }
 
         /**
@@ -497,16 +442,23 @@ class ListeningHistoryStore(context: Context, private val onChanged: () -> Unit)
             limit: Int = TOP_LIMIT,
             predicate: (Long) -> Boolean
         ): List<TrackListenStats> {
+            return rankByCount(entries, tracksByUri, limit) { entry ->
+                entry.timestamps.count(predicate)
+            }
+        }
+
+        private inline fun rankByCount(
+            entries: Map<String, Entry>,
+            tracksByUri: Map<String, Track>,
+            limit: Int,
+            countOf: (Entry) -> Int
+        ): List<TrackListenStats> {
             val stats = ArrayList<TrackListenStats>()
             for ((uri, entry) in entries) {
                 val track = tracksByUri[uri] ?: continue
-                var count = 0
-                for (ts in entry.timestamps) {
-                    if (predicate(ts)) count++
-                }
+                val count = countOf(entry)
                 if (count > 0) {
-                    val totalMs = count.toLong() * effectiveDurationMs(track)
-                    stats.add(TrackListenStats(uri, count, totalMs))
+                    stats.add(TrackListenStats(uri, count, count.toLong() * effectiveDurationMs(track)))
                 }
             }
             stats.sortWith(

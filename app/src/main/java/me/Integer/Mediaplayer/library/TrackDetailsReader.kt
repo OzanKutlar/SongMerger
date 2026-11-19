@@ -68,41 +68,28 @@ object TrackDetailsReader {
     )
 
     private fun readExtraTags(context: Context, uri: Uri): ExtraTags {
-        val retriever = MediaMetadataRetriever()
-        return try {
-            retriever.setDataSource(context.applicationContext, uri)
-            val year = text(retriever, MediaMetadataRetriever.METADATA_KEY_YEAR)
-                ?: text(retriever, MediaMetadataRetriever.METADATA_KEY_DATE).orEmpty()
-            val bitrateRaw = text(retriever, MediaMetadataRetriever.METADATA_KEY_BITRATE)?.toLongOrNull()
-            val bitrate = if (bitrateRaw != null && bitrateRaw > 0L) "${bitrateRaw / 1000L} kbps" else ""
-            val sampleRaw = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                text(retriever, MediaMetadataRetriever.METADATA_KEY_SAMPLERATE)?.toLongOrNull()
-            } else {
-                null
+        return TagReader.useRetriever(context, uri) { retriever ->
+            with(TagReader) {
+                val year = retriever.extractText(MediaMetadataRetriever.METADATA_KEY_YEAR)
+                    ?: retriever.extractText(MediaMetadataRetriever.METADATA_KEY_DATE).orEmpty()
+                val bitrateRaw = retriever.extractText(MediaMetadataRetriever.METADATA_KEY_BITRATE)?.toLongOrNull()
+                val bitrate = if (bitrateRaw != null && bitrateRaw > 0L) "${bitrateRaw / 1000L} kbps" else ""
+                val sampleRaw = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                    retriever.extractText(MediaMetadataRetriever.METADATA_KEY_SAMPLERATE)?.toLongOrNull()
+                } else {
+                    null
+                }
+                val sampleRate = if (sampleRaw != null && sampleRaw > 0L) "$sampleRaw Hz" else ""
+                ExtraTags(
+                    year = year,
+                    genre = retriever.extractText(MediaMetadataRetriever.METADATA_KEY_GENRE).orEmpty(),
+                    trackNumber = retriever.extractText(MediaMetadataRetriever.METADATA_KEY_CD_TRACK_NUMBER).orEmpty(),
+                    bitrate = bitrate,
+                    sampleRate = sampleRate,
+                    mimeType = retriever.extractText(MediaMetadataRetriever.METADATA_KEY_MIMETYPE).orEmpty()
+                )
             }
-            val sampleRate = if (sampleRaw != null && sampleRaw > 0L) "$sampleRaw Hz" else ""
-            ExtraTags(
-                year = year,
-                genre = text(retriever, MediaMetadataRetriever.METADATA_KEY_GENRE).orEmpty(),
-                trackNumber = text(retriever, MediaMetadataRetriever.METADATA_KEY_CD_TRACK_NUMBER).orEmpty(),
-                bitrate = bitrate,
-                sampleRate = sampleRate,
-                mimeType = text(retriever, MediaMetadataRetriever.METADATA_KEY_MIMETYPE).orEmpty()
-            )
-        } catch (e: RuntimeException) {
-            Log.w(TAG, "cannot read extra tags for $uri: ${e.message}")
-            ExtraTags()
-        } finally {
-            try {
-                retriever.release()
-            } catch (e: Exception) {
-                Log.w(TAG, "cannot release tag reader: ${e.message}")
-            }
-        }
-    }
-
-    private fun text(retriever: MediaMetadataRetriever, key: Int): String? {
-        return retriever.extractMetadata(key)?.trim()?.takeIf { it.isNotEmpty() }
+        } ?: ExtraTags()
     }
 
     private fun formatSize(bytes: Long): String {

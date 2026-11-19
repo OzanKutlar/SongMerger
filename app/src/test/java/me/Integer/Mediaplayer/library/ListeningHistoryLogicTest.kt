@@ -14,8 +14,10 @@ class ListeningHistoryLogicTest {
             artistTag = "Artist",
             album = "Album",
             durationMs = durationMs,
-            addedSec = 0L,
-            fileName = "$title.mp3"
+            folderUri = "content://folder",
+            fileName = "$title.mp3",
+            sizeBytes = 1000L,
+            modifiedMs = 0L
         )
     }
 

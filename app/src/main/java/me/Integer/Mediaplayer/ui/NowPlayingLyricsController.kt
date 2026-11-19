@@ -8,8 +8,6 @@ import android.util.TypedValue
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
-import android.view.animation.AccelerateInterpolator
-import android.view.animation.DecelerateInterpolator
 import android.widget.TextView
 import androidx.core.content.ContextCompat
 import androidx.recyclerview.widget.LinearLayoutManager
@@ -17,6 +15,7 @@ import androidx.recyclerview.widget.RecyclerView
 import me.Integer.Mediaplayer.R
 import me.Integer.Mediaplayer.library.LibraryRepository
 import me.Integer.Mediaplayer.library.LyricsReader
+import me.Integer.Mediaplayer.ui.widgets.ViewGeometry
 import java.util.concurrent.Executors
 import kotlin.math.roundToInt
 
@@ -79,52 +78,12 @@ class NowPlayingLyricsController(
         if (isLyricsVisible == visible) return
         isLyricsVisible = visible
         onStateChanged()
-
-        discStage.animate().cancel()
-        lyricsStage.animate().cancel()
         main.removeCallbacks(tickTask)
-
         if (visible) {
             ensureLoaded()
-            lyricsStage.visibility = View.VISIBLE
             main.post(tickTask)
-            if (!animate) {
-                discStage.alpha = 0f
-                discStage.visibility = View.INVISIBLE
-                lyricsStage.alpha = 1f
-                return
-            }
-            discStage.animate()
-                .alpha(0f)
-                .setDuration(FADE_MS)
-                .setInterpolator(ACCELERATE)
-                .withEndAction { if (isLyricsVisible) discStage.visibility = View.INVISIBLE }
-                .start()
-            lyricsStage.animate()
-                .alpha(1f)
-                .setDuration(FADE_MS)
-                .setInterpolator(DECELERATE)
-                .start()
-        } else {
-            discStage.visibility = View.VISIBLE
-            if (!animate) {
-                lyricsStage.alpha = 0f
-                lyricsStage.visibility = View.GONE
-                discStage.alpha = 1f
-                return
-            }
-            lyricsStage.animate()
-                .alpha(0f)
-                .setDuration(FADE_MS)
-                .setInterpolator(ACCELERATE)
-                .withEndAction { if (!isLyricsVisible) lyricsStage.visibility = View.GONE }
-                .start()
-            discStage.animate()
-                .alpha(1f)
-                .setDuration(FADE_MS)
-                .setInterpolator(DECELERATE)
-                .start()
         }
+        ViewGeometry.transitionOverlayStage(discStage, lyricsStage, visible, animate) { isLyricsVisible }
     }
 
     fun onPlayerChanged() {
@@ -252,9 +211,6 @@ class NowPlayingLyricsController(
     }
 
     private companion object {
-        const val FADE_MS = 220L
         const val SYNC_INTERVAL_MS = 200L
-        val ACCELERATE = AccelerateInterpolator()
-        val DECELERATE = DecelerateInterpolator()
     }
 }

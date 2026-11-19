@@ -129,47 +129,24 @@ object MashupStepDialog {
             )
         }
 
-        startSeek.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
-            override fun onProgressChanged(bar: SeekBar?, progress: Int, fromUser: Boolean) {
-                if (!fromUser) return
-                val candidate = (durationMs * progress) / 1000L
-                startMs = candidate.coerceAtMost(maxOf(0L, endMs - MixSegment.MIN_LENGTH_MS))
-                refreshLabels()
-            }
-            override fun onStartTrackingTouch(bar: SeekBar?) = Unit
-            override fun onStopTrackingTouch(bar: SeekBar?) = Unit
-        })
-
-        endSeek.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
-            override fun onProgressChanged(bar: SeekBar?, progress: Int, fromUser: Boolean) {
-                if (!fromUser) return
-                val candidate = (durationMs * progress) / 1000L
-                endMs = candidate.coerceAtLeast(minOf(durationMs, startMs + MixSegment.MIN_LENGTH_MS))
-                refreshLabels()
-            }
-            override fun onStartTrackingTouch(bar: SeekBar?) = Unit
-            override fun onStopTrackingTouch(bar: SeekBar?) = Unit
-        })
-
-        fadeSeek.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
-            override fun onProgressChanged(bar: SeekBar?, progress: Int, fromUser: Boolean) {
-                if (!fromUser) return
-                crossfadeMs = progress * 500L
-                refreshLabels()
-            }
-            override fun onStartTrackingTouch(bar: SeekBar?) = Unit
-            override fun onStopTrackingTouch(bar: SeekBar?) = Unit
-        })
-
-        tempoSeek.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
-            override fun onProgressChanged(bar: SeekBar?, progress: Int, fromUser: Boolean) {
-                if (!fromUser) return
-                tempoRatio = MixSegment.MIN_TEMPO_RATIO + progress * 0.01f
-                refreshLabels()
-            }
-            override fun onStartTrackingTouch(bar: SeekBar?) = Unit
-            override fun onStopTrackingTouch(bar: SeekBar?) = Unit
-        })
+        startSeek.onUserProgress { progress ->
+            val candidate = (durationMs * progress) / 1000L
+            startMs = candidate.coerceAtMost(maxOf(0L, endMs - MixSegment.MIN_LENGTH_MS))
+            refreshLabels()
+        }
+        endSeek.onUserProgress { progress ->
+            val candidate = (durationMs * progress) / 1000L
+            endMs = candidate.coerceAtLeast(minOf(durationMs, startMs + MixSegment.MIN_LENGTH_MS))
+            refreshLabels()
+        }
+        fadeSeek.onUserProgress { progress ->
+            crossfadeMs = progress * 500L
+            refreshLabels()
+        }
+        tempoSeek.onUserProgress { progress ->
+            tempoRatio = MixSegment.MIN_TEMPO_RATIO + progress * 0.01f
+            refreshLabels()
+        }
 
         refreshLabels()
         for (v in listOf(startLabel, startSeek, endLabel, endSeek, fadeLabel, fadeSeek, tempoLabel, tempoSeek)) {
@@ -256,6 +233,16 @@ object MashupStepDialog {
             setTextColor(ContextCompat.getColor(context, R.color.text_primary))
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
         }
+    }
+
+    private inline fun SeekBar.onUserProgress(crossinline action: (Int) -> Unit) {
+        setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(bar: SeekBar?, progress: Int, fromUser: Boolean) {
+                if (fromUser) action(progress)
+            }
+            override fun onStartTrackingTouch(bar: SeekBar?) = Unit
+            override fun onStopTrackingTouch(bar: SeekBar?) = Unit
+        })
     }
 
     private fun dp(context: Context, value: Int): Int {

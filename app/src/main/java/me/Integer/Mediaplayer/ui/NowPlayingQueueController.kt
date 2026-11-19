@@ -5,8 +5,6 @@ import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.drawable.Drawable
 import android.view.View
-import android.view.animation.AccelerateInterpolator
-import android.view.animation.DecelerateInterpolator
 import android.widget.ImageView
 import android.widget.TextView
 import android.widget.Toast
@@ -19,6 +17,7 @@ import me.Integer.Mediaplayer.R
 import me.Integer.Mediaplayer.library.LibraryRepository
 import me.Integer.Mediaplayer.library.Track
 import me.Integer.Mediaplayer.ui.widgets.ShuffleItemAnimator
+import me.Integer.Mediaplayer.ui.widgets.ViewGeometry
 
 /**
  * Drives the inline playback queue inside the Now Playing screen.
@@ -118,55 +117,13 @@ class NowPlayingQueueController(
         updateQueueIconTint()
         onStateChanged()
 
-        discStage.animate().cancel()
-        queueStage.animate().cancel()
-
         if (visible) {
             render()
             scrollToCurrentTrack()
-            queueStage.visibility = View.VISIBLE
-            if (!animate) {
-                discStage.alpha = 0f
-                discStage.visibility = View.INVISIBLE
-                queueStage.alpha = 1f
-                return
-            }
-            discStage.animate()
-                .alpha(0f)
-                .setDuration(FADE_DURATION_MS)
-                .setInterpolator(ACCELERATE)
-                .withEndAction {
-                    if (isQueueVisible) discStage.visibility = View.INVISIBLE
-                }
-                .start()
-            queueStage.animate()
-                .alpha(1f)
-                .setDuration(FADE_DURATION_MS)
-                .setInterpolator(DECELERATE)
-                .start()
         } else {
             shuffleMotion.disarm()
-            discStage.visibility = View.VISIBLE
-            if (!animate) {
-                queueStage.alpha = 0f
-                queueStage.visibility = View.GONE
-                discStage.alpha = 1f
-                return
-            }
-            queueStage.animate()
-                .alpha(0f)
-                .setDuration(FADE_DURATION_MS)
-                .setInterpolator(ACCELERATE)
-                .withEndAction {
-                    if (!isQueueVisible) queueStage.visibility = View.GONE
-                }
-                .start()
-            discStage.animate()
-                .alpha(1f)
-                .setDuration(FADE_DURATION_MS)
-                .setInterpolator(DECELERATE)
-                .start()
         }
+        ViewGeometry.transitionOverlayStage(discStage, queueStage, visible, animate) { isQueueVisible }
     }
 
     /**
@@ -501,7 +458,6 @@ class NowPlayingQueueController(
     }
 
     private companion object {
-        const val FADE_DURATION_MS = 220L
         const val COLOR_ON = 0xFFFF6D00.toInt()
         const val COLOR_IDLE = 0xFFFDF8F5.toInt()
         const val DRAG_ALPHA = 0.75f
@@ -510,7 +466,5 @@ class NowPlayingQueueController(
         const val SWIPE_COLOR = 0xFFD32F2F.toInt()
         const val SWIPE_ICON_DP = 24f
         const val SWIPE_MARGIN_DP = 24f
-        val ACCELERATE = AccelerateInterpolator()
-        val DECELERATE = DecelerateInterpolator()
     }
 }

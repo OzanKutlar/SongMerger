@@ -13,7 +13,14 @@ from typing import Any, BinaryIO
 
 import numpy as np
 
-from audio_analyzer import HOP_LENGTH, SAMPLE_RATE, FeatureCache, analyze_decoded, decode_audio_with_peak
+from audio_analyzer import (
+    HOP_LENGTH,
+    SAMPLE_RATE,
+    FeatureCache,
+    analyze_decoded,
+    decode_audio_with_peak,
+    safe_track_name as safe_name,
+)
 
 MAX_UPLOAD_BYTES = 80 * 1024 * 1024
 READ_CHUNK_BYTES = 65536
@@ -22,10 +29,6 @@ MAX_JOB_TRACKS = 2000
 MAX_INBOX_FILES = 20000
 STALE_INBOX_SEC = 30 * 24 * 3600  # Keep uploaded audio for 30 days so re-analysis needs no re-upload
 ALLOWED_SUFFIXES = (".mp3", ".m4a", ".aac", ".flac", ".wav", ".ogg", ".opus", ".wma")
-
-
-def safe_name(track_id: str) -> str:
-    return "".join(ch if ch.isalnum() or ch in ("-", "_") else "_" for ch in track_id)[:120]
 
 
 @dataclass(frozen=True)

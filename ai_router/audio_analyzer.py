@@ -438,6 +438,10 @@ def analyze_audio_file(
     return analyze_decoded(y, track_id, title, artist, fingerprint, extractor, peak)
 
 
+def safe_track_name(track_id: str) -> str:
+    return "".join(ch if ch.isalnum() or ch in ("-", "_") else "_" for ch in track_id)[:120]
+
+
 class FeatureCache:
     """Persistent JSON cache of analyzed track descriptors keyed by track_id."""
 
@@ -446,8 +450,7 @@ class FeatureCache:
         self.cache_dir.mkdir(parents=True, exist_ok=True)
 
     def _path_for(self, track_id: str) -> Path:
-        safe = "".join(ch if ch.isalnum() or ch in ("-", "_") else "_" for ch in track_id)
-        return self.cache_dir / f"{safe}.json"
+        return self.cache_dir / f"{safe_track_name(track_id)}.json"
 
     def has(self, track_id: str, fingerprint: str) -> bool:
         path = self._path_for(track_id)

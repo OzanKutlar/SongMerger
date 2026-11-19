@@ -14,43 +14,41 @@ class TagReader(context: Context) {
 
     /** @return null when the file cannot be opened or is not readable audio */
     fun read(uri: Uri): Tags? {
-        val retriever = MediaMetadataRetriever()
-        return try {
-            retriever.setDataSource(appContext, uri)
-            extract(retriever)
-        } catch (e: RuntimeException) {
-            Log.w(TAG, "cannot read tags of $uri: ${e.message}")
-            null
-        } finally {
-            release(retriever)
+        return useRetriever(appContext, uri) { retriever ->
+            val artist = retriever.extractText(MediaMetadataRetriever.METADATA_KEY_ARTIST)
+                ?: retriever.extractText(MediaMetadataRetriever.METADATA_KEY_ALBUMARTIST)
+            val duration = retriever.extractText(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull()
+            Tags(
+                title = retriever.extractText(MediaMetadataRetriever.METADATA_KEY_TITLE),
+                artist = artist,
+                album = retriever.extractText(MediaMetadataRetriever.METADATA_KEY_ALBUM),
+                durationMs = maxOf(0L, duration ?: 0L)
+            )
         }
     }
 
-    private fun extract(retriever: MediaMetadataRetriever): Tags {
-        val artist = text(retriever, MediaMetadataRetriever.METADATA_KEY_ARTIST)
-            ?: text(retriever, MediaMetadataRetriever.METADATA_KEY_ALBUMARTIST)
-        val duration = text(retriever, MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull()
-        return Tags(
-            title = text(retriever, MediaMetadataRetriever.METADATA_KEY_TITLE),
-            artist = artist,
-            album = text(retriever, MediaMetadataRetriever.METADATA_KEY_ALBUM),
-            durationMs = maxOf(0L, duration ?: 0L)
-        )
-    }
+    companion object {
+        private const val TAG = "TagReader"
 
-    private fun text(retriever: MediaMetadataRetriever, key: Int): String? {
-        return retriever.extractMetadata(key)?.trim()?.takeIf { it.isNotEmpty() }
-    }
-
-    private fun release(retriever: MediaMetadataRetriever) {
-        try {
-            retriever.release()
-        } catch (e: Exception) {
-            Log.w(TAG, "cannot release the tag reader: ${e.message}")
+        fun <T> useRetriever(context: Context, uri: Uri, block: (MediaMetadataRetriever) -> T?): T? {
+            val retriever = MediaMetadataRetriever()
+            return try {
+                retriever.setDataSource(context.applicationContext, uri)
+                block(retriever)
+            } catch (e: RuntimeException) {
+                Log.w(TAG, "cannot read metadata of $uri: ${e.message}")
+                null
+            } finally {
+                try {
+                    retriever.release()
+                } catch (e: Exception) {
+                    Log.w(TAG, "cannot release metadata reader: ${e.message}")
+                }
+            }
         }
-    }
 
-    private companion object {
-        const val TAG = "TagReader"
+        fun MediaMetadataRetriever.extractText(key: Int): String? {
+            return extractMetadata(key)?.trim()?.takeIf { it.isNotEmpty() }
+        }
     }
 }

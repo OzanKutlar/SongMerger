@@ -90,13 +90,19 @@ class LibraryScanner(context: Context, private val tagReader: TagReader) {
         out: MutableList<FoundFile>,
         subfolders: MutableList<String>?
     ) {
+        forEachChildRow(tree, documentId) { cursor ->
+            matchRow(tree, cursor, fileName, out, subfolders)
+        }
+    }
+
+    private inline fun forEachChildRow(tree: Uri, documentId: String, onRow: (Cursor) -> Unit) {
         val children = DocumentsContract.buildChildDocumentsUriUsingTree(tree, documentId)
         try {
             resolver.query(children, PROJECTION, null, null, null)?.use { cursor ->
                 var rows = 0
                 while (rows < MAX_CHILDREN && cursor.moveToNext()) {
                     rows++
-                    matchRow(tree, cursor, fileName, out, subfolders)
+                    onRow(cursor)
                 }
             }
         } catch (e: RuntimeException) {
@@ -157,35 +163,14 @@ class LibraryScanner(context: Context, private val tagReader: TagReader) {
     // ------------------------------------------------------------------ folder walk
 
     private fun walk(walk: Walk, cancelled: AtomicBoolean) {
-        val rootId = try {
-            DocumentsContract.getTreeDocumentId(walk.tree)
-        } catch (e: IllegalArgumentException) {
-            Log.w(TAG, "not a folder: ${walk.tree}")
-            return
-        }
+        val rootId = rootIdOf(walk.tree) ?: return
         walk.pending.addLast(rootId to 0)
         for (visited in 0 until MAX_FOLDERS) {
             if (cancelled.get()) return
             val (documentId, depth) = walk.pending.removeFirstOrNull() ?: return
-            listChildren(walk, documentId, depth)
+            forEachChildRow(walk.tree, documentId) { cursor -> acceptRow(walk, cursor, depth) }
         }
         Log.w(TAG, "folder limit reached under ${walk.tree}, the rest is skipped")
-    }
-
-    private fun listChildren(walk: Walk, documentId: String, depth: Int) {
-        val children = DocumentsContract.buildChildDocumentsUriUsingTree(walk.tree, documentId)
-        try {
-            resolver.query(children, PROJECTION, null, null, null)?.use { cursor ->
-                var rows = 0
-                while (rows < MAX_CHILDREN && cursor.moveToNext()) {
-                    rows++
-                    acceptRow(walk, cursor, depth)
-                }
-            }
-        } catch (e: RuntimeException) {
-            // SecurityException when access was revoked, or a failing storage provider.
-            Log.w(TAG, "cannot list $documentId: ${e.message}")
-        }
     }
 
     private fun acceptRow(walk: Walk, cursor: Cursor, depth: Int) {

@@ -1,7 +1,10 @@
 package me.Integer.Mediaplayer.playback
 
+import android.net.Uri
 import android.os.Bundle
+import androidx.media3.common.C
 import androidx.media3.common.MediaItem
+import androidx.media3.common.MediaMetadata
 import androidx.media3.session.SessionCommand
 import kotlin.math.pow
 
@@ -96,5 +99,52 @@ internal object QueueCommands {
         if (item == null) return 1f
         val db = gainDbOf(item)
         return if (db == 0f) 1f else 10.0.pow(db / 20.0).toFloat()
+    }
+
+    /**
+     * Builds a playable [MediaItem] with queue slot metadata and optional mashup clipping.
+     * Shared by [PlayerConnection] and [PlaybackService].
+     */
+    fun buildMediaItem(
+        uri: String,
+        title: String,
+        artist: String,
+        album: String,
+        uid: Long,
+        clipStartMs: Long = 0L,
+        clipEndMs: Long = SavedItem.TO_END,
+        crossfadeMs: Long = 0L,
+        tempoRatio: Float = 1f,
+        gainDb: Float = 0f
+    ): MediaItem {
+        val extras = Bundle().apply {
+            putLong(EXTRA_UID, uid)
+            if (crossfadeMs > 0L || tempoRatio != 1f) {
+                putLong(EXTRA_CROSSFADE_MS, crossfadeMs)
+                putFloat(EXTRA_TEMPO_RATIO, tempoRatio)
+            }
+            if (gainDb != 0f) putFloat(EXTRA_GAIN_DB, gainDb)
+        }
+        val metadata = MediaMetadata.Builder()
+            .setTitle(title)
+            .setArtist(artist.ifEmpty { null })
+            .setAlbumTitle(album.ifEmpty { null })
+            .setArtworkUri(Uri.parse(uri))
+            .setExtras(extras)
+            .build()
+        val builder = MediaItem.Builder()
+            .setMediaId(uri)
+            .setUri(uri)
+            .setMediaMetadata(metadata)
+        if (clipStartMs > 0L || clipEndMs != SavedItem.TO_END) {
+            val end = if (clipEndMs == SavedItem.TO_END) C.TIME_END_OF_SOURCE else clipEndMs
+            builder.setClippingConfiguration(
+                MediaItem.ClippingConfiguration.Builder()
+                    .setStartPositionMs(clipStartMs)
+                    .setEndPositionMs(end)
+                    .build()
+            )
+        }
+        return builder.build()
     }
 }

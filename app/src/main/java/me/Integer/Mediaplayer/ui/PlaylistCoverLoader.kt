@@ -176,7 +176,7 @@ class PlaylistCoverLoader private constructor(context: Context) {
         BitmapFactory.decodeFile(path, bounds)
         if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
         val options = BitmapFactory.Options().apply {
-            inSampleSize = sampleSize(minOf(bounds.outWidth, bounds.outHeight), COVER_PX)
+            inSampleSize = EmbeddedArt.sampleSize(minOf(bounds.outWidth, bounds.outHeight), COVER_PX)
         }
         return try {
             BitmapFactory.decodeFile(path, options)
@@ -184,15 +184,6 @@ class PlaylistCoverLoader private constructor(context: Context) {
             Log.w(TAG, "out of memory decoding $path")
             null
         }
-    }
-
-    private fun sampleSize(shortestPx: Int, targetPx: Int): Int {
-        var sample = 1
-        for (step in 0 until MAX_HALVINGS) {
-            if (shortestPx / (sample * 2) < targetPx) break
-            sample *= 2
-        }
-        return sample
     }
 
     // ------------------------------------------------------------------ image import (worker thread)
@@ -250,18 +241,7 @@ class PlaylistCoverLoader private constructor(context: Context) {
     }
 
     private fun decodeBytes(bytes: ByteArray): Bitmap? {
-        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
-        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
-        val options = BitmapFactory.Options().apply {
-            inSampleSize = sampleSize(minOf(bounds.outWidth, bounds.outHeight), IMPORT_PX)
-        }
-        return try {
-            BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options)
-        } catch (e: OutOfMemoryError) {
-            Log.w(TAG, "out of memory decoding the picked image")
-            null
-        }
+        return EmbeddedArt.decodeByteArray(bytes, IMPORT_PX)
     }
 
     companion object {
@@ -276,7 +256,6 @@ class PlaylistCoverLoader private constructor(context: Context) {
         private const val CACHE_BYTES = 16 * 1024 * 1024
         private const val MAX_QUEUED = 32
         private const val MAX_REMEMBERED_MISSES = 500
-        private const val MAX_HALVINGS = 6
         private const val MAX_IMPORT_BYTES = 24 * 1024 * 1024
         private const val BUFFER_BYTES = 16 * 1024
         private const val MAX_READS = 4096

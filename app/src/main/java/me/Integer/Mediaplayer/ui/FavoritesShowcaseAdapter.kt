@@ -10,6 +10,7 @@ import androidx.recyclerview.widget.RecyclerView
 import me.Integer.Mediaplayer.R
 import me.Integer.Mediaplayer.library.Playlist
 import me.Integer.Mediaplayer.ui.widgets.SkeletonDrawable
+import me.Integer.Mediaplayer.ui.widgets.ViewGeometry
 
 /**
  * Renders the Favorites tab as a 3-column grid showcase:
@@ -101,7 +102,7 @@ class FavoritesShowcaseAdapter(
         val view = inflater.inflate(R.layout.item_playlist_grid, parent, false)
         val holder = PlaylistHolder(view)
         holder.thumb.clipToOutline = true
-        applySquareSize(parent, holder.thumb)
+        ViewGeometry.applySquareGridSize(parent, holder.thumb)
         view.setOnClickListener {
             val row = items.getOrNull(holder.bindingAdapterPosition) as? Row.PlaylistCard ?: return@setOnClickListener
             onClick(row.playlist)
@@ -155,26 +156,10 @@ class FavoritesShowcaseAdapter(
         holder.menu.visibility = View.INVISIBLE
     }
 
-    private fun applySquareSize(parent: ViewGroup, thumb: View) {
-        val usableWidth = parent.measuredWidth - parent.paddingLeft - parent.paddingRight
-        val density = parent.resources.displayMetrics.density
-        val cellPaddingPx = (CELL_PADDING_DP * 2 * density).toInt()
-        val fallbackPx = (DEFAULT_TILE_DP * density).toInt()
-        val side = if (usableWidth > 0) (usableWidth / GRID_COLUMNS) - cellPaddingPx else fallbackPx
-        if (side > 0) {
-            val params = thumb.layoutParams
-            params.height = side
-            thumb.layoutParams = params
-        }
-    }
-
     companion object {
         const val TYPE_PLAYLIST = 0
         const val TYPE_HEADER = 1
         private const val SKELETON_COUNT = 6
-        private const val GRID_COLUMNS = 3
-        private const val CELL_PADDING_DP = 5f
-        private const val DEFAULT_TILE_DP = 112f
         private const val TILE_CORNER_DP = 14f
     }
 }

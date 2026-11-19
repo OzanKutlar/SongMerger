@@ -18,10 +18,8 @@ from urllib.parse import unquote_plus
 import numpy as np
 
 from audio_analyzer import FeatureCache
-from jobs import MAX_JOB_TRACKS, JobRunner, UploadInbox
+from jobs import MAX_JOB_TRACKS, MAX_UPLOAD_BYTES, JobRunner, UploadInbox
 from router_engine import CueTable, generate_mashup_playlists, score_transition
-
-MAX_UPLOAD_BYTES = 80 * 1024 * 1024
 MAX_JSON_BYTES = 4 * 1024 * 1024
 DEFAULT_CACHE_DIR = Path(__file__).resolve().parent / "cache"
 JOBS_PREFIX = "/api/v1/jobs/"

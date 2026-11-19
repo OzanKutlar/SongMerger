@@ -11,6 +11,7 @@ import androidx.recyclerview.widget.RecyclerView
 import me.Integer.Mediaplayer.R
 import me.Integer.Mediaplayer.library.Artist
 import me.Integer.Mediaplayer.ui.widgets.SkeletonDrawable
+import me.Integer.Mediaplayer.ui.widgets.ViewGeometry
 
 /** Compact grid tiles for artists: square cover from their first song, overlaid name and song count. */
 class ArtistAdapter(
@@ -60,7 +61,7 @@ class ArtistAdapter(
         val view = LayoutInflater.from(parent.context).inflate(R.layout.item_artist, parent, false)
         val holder = Holder(view)
         holder.thumb.clipToOutline = true
-        applySquareSize(parent, holder.thumb)
+        ViewGeometry.applySquareGridSize(parent, holder.thumb)
         view.setOnClickListener {
             val position = holder.bindingAdapterPosition
             if (position in artists.indices) onClick(artists[position])
@@ -97,24 +98,8 @@ class ArtistAdapter(
         holder.count.background = null
     }
 
-    private fun applySquareSize(parent: ViewGroup, thumb: View) {
-        val usableWidth = parent.measuredWidth - parent.paddingLeft - parent.paddingRight
-        val density = parent.resources.displayMetrics.density
-        val cellPaddingPx = (CELL_PADDING_DP * 2 * density).toInt()
-        val fallbackPx = (DEFAULT_TILE_DP * density).toInt()
-        val side = if (usableWidth > 0) (usableWidth / GRID_COLUMNS) - cellPaddingPx else fallbackPx
-        if (side > 0) {
-            val params = thumb.layoutParams
-            params.height = side
-            thumb.layoutParams = params
-        }
-    }
-
     companion object {
         private const val SKELETON_COUNT = 9
-        private const val GRID_COLUMNS = 3
-        private const val CELL_PADDING_DP = 5f
-        private const val DEFAULT_TILE_DP = 112f
         private const val TILE_CORNER_DP = 14f
 
         fun diff(previous: List<Artist>, next: List<Artist>): DiffUtil.DiffResult {

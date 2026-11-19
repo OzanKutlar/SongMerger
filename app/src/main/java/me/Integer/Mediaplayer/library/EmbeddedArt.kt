@@ -3,7 +3,6 @@ package me.Integer.Mediaplayer.library
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
-import android.media.MediaMetadataRetriever
 import android.net.Uri
 import android.util.Log
 
@@ -17,11 +16,15 @@ object EmbeddedArt {
 
     /** The cover downsampled to roughly [targetPx] on its short side, or null when there is none. */
     fun decode(context: Context, uri: Uri, targetPx: Int): Bitmap? {
-        val data = pictureBytes(context, uri) ?: return null
+        val data = TagReader.useRetriever(context, uri) { it.embeddedPicture } ?: return null
         if (data.size > MAX_BYTES) {
             Log.w(TAG, "cover of $uri is larger than $MAX_BYTES bytes, skipped")
             return null
         }
+        return decodeByteArray(data, targetPx)
+    }
+
+    fun decodeByteArray(data: ByteArray, targetPx: Int): Bitmap? {
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
         BitmapFactory.decodeByteArray(data, 0, data.size, bounds)
         if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
@@ -31,29 +34,12 @@ object EmbeddedArt {
         return try {
             BitmapFactory.decodeByteArray(data, 0, data.size, options)
         } catch (e: OutOfMemoryError) {
-            Log.w(TAG, "out of memory decoding the cover of $uri")
+            Log.w(TAG, "out of memory decoding image bytes")
             null
         }
     }
 
-    private fun pictureBytes(context: Context, uri: Uri): ByteArray? {
-        val retriever = MediaMetadataRetriever()
-        return try {
-            retriever.setDataSource(context, uri)
-            retriever.embeddedPicture
-        } catch (e: RuntimeException) {
-            Log.w(TAG, "cannot read the cover of $uri: ${e.message}")
-            null
-        } finally {
-            try {
-                retriever.release()
-            } catch (e: Exception) {
-                Log.w(TAG, "cannot release the cover reader: ${e.message}")
-            }
-        }
-    }
-
-    private fun sampleSize(shortestPx: Int, targetPx: Int): Int {
+    fun sampleSize(shortestPx: Int, targetPx: Int): Int {
         val target = maxOf(MIN_TARGET_PX, targetPx)
         var sample = 1
         for (step in 0 until MAX_HALVINGS) {

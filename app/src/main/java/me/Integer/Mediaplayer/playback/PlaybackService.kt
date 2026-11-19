@@ -646,35 +646,18 @@ class PlaybackService : MediaSessionService() {
 
     /** The same item the app builds, so mashup steps keep their part of the song and their blend. */
     private fun toMediaItem(saved: SavedItem): MediaItem {
-        val extras = Bundle().apply {
-            putLong(QueueCommands.EXTRA_UID, saved.uid)
-            if (saved.crossfadeMs > 0L || saved.tempoRatio != 1f) {
-                putLong(QueueCommands.EXTRA_CROSSFADE_MS, saved.crossfadeMs)
-                putFloat(QueueCommands.EXTRA_TEMPO_RATIO, saved.tempoRatio)
-            }
-            if (saved.gainDb != 0f) putFloat(QueueCommands.EXTRA_GAIN_DB, saved.gainDb)
-        }
-        val metadata = MediaMetadata.Builder()
-            .setTitle(saved.title)
-            .setArtist(saved.artist.ifEmpty { null })
-            .setAlbumTitle(saved.album.ifEmpty { null })
-            .setArtworkUri(Uri.parse(saved.uri))
-            .setExtras(extras)
-            .build()
-        val builder = MediaItem.Builder()
-            .setMediaId(saved.uri)
-            .setUri(saved.uri)
-            .setMediaMetadata(metadata)
-        if (saved.clipStartMs > 0L || saved.clipEndMs != SavedItem.TO_END) {
-            val end = if (saved.clipEndMs == SavedItem.TO_END) C.TIME_END_OF_SOURCE else saved.clipEndMs
-            builder.setClippingConfiguration(
-                MediaItem.ClippingConfiguration.Builder()
-                    .setStartPositionMs(saved.clipStartMs)
-                    .setEndPositionMs(end)
-                    .build()
-            )
-        }
-        return builder.build()
+        return QueueCommands.buildMediaItem(
+            uri = saved.uri,
+            title = saved.title,
+            artist = saved.artist,
+            album = saved.album,
+            uid = saved.uid,
+            clipStartMs = saved.clipStartMs,
+            clipEndMs = saved.clipEndMs,
+            crossfadeMs = saved.crossfadeMs,
+            tempoRatio = saved.tempoRatio,
+            gainDb = saved.gainDb
+        )
     }
 
     // ------------------------------------------------------------------ setup
