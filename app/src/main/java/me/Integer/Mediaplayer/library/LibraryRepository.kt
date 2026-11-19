@@ -35,6 +35,7 @@ class LibraryRepository private constructor(appContext: Context) {
     val overrides = ArtistOverrides(appContext)
     val favorites = FavoritesStore(appContext)
     val playlists = PlaylistStore(appContext) { notifyArtistRulesChanged() }
+    val history = ListeningHistoryStore(appContext) { main.post { notifyListenersChanged() } }
 
     private val index = LibraryIndex(appContext)
     private val scanner = LibraryScanner(appContext, TagReader(appContext))
@@ -79,6 +80,7 @@ class LibraryRepository private constructor(appContext: Context) {
         worker.execute {
             val cached = index.load()
             playlists.preload()
+            history.preload()
             for (track in cached) {
                 displayArtist(track)
             }
@@ -209,6 +211,23 @@ class LibraryRepository private constructor(appContext: Context) {
         val favUris = favorites.all()
         if (favUris.isEmpty()) return emptyList()
         return tracks.filter { it.uri in favUris }
+    }
+
+    /** Builds the system playlists and seasonal/monthly Recaps for the Favorites tab. */
+    fun favoritesShowcase(): ListeningHistoryStore.FavoritesShowcase {
+        return history.buildShowcase(favoriteTracks(), tracks)
+    }
+
+    /** Returns either a user playlist (`id > 0`) or a system/recap playlist (`id < 0`). */
+    fun getPlaylistOrSystem(id: Long): Playlist? {
+        if (id >= 0L) return playlists.get(id)
+        return history.resolveSystemPlaylist(id, favoriteTracks(), tracks)?.playlist
+    }
+
+    /** For system/recap playlists (`id < 0`), returns the per-song listen stats in that timeframe. */
+    fun systemPlaylistStats(id: Long): Map<String, ListeningHistoryStore.TrackListenStats> {
+        if (id >= 0L) return emptyMap()
+        return history.resolveSystemPlaylist(id, favoriteTracks(), tracks)?.statsByUri.orEmpty()
     }
 
     fun tracksInAlbum(album: String): List<Track> {

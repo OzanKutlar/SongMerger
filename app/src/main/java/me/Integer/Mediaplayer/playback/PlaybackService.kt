@@ -34,6 +34,8 @@ import androidx.media3.session.SessionResult
 import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
 import me.Integer.Mediaplayer.MainActivity
+import me.Integer.Mediaplayer.library.LibraryRepository
+import me.Integer.Mediaplayer.library.ListeningHistoryStore
 import me.Integer.Mediaplayer.library.PlayerSettings
 import kotlin.random.Random
 
@@ -72,6 +74,19 @@ class PlaybackService : MediaSessionService() {
     private var sleepDeadlineMs = 0L
     private var sleepEndOfTrack = false
     private var sleepFadingSinceMs = 0L
+
+    // Song listen tracking: counts once the user has actively listened to at least half the song
+    private var trackedMediaId = ""
+    private var trackedUid = 0L
+    private var trackedAccumulatedMs = 0L
+    private var trackedPlayStartElapsedMs = 0L
+    private var trackedCounted = false
+
+    private val listenCheckTask = object : Runnable {
+        override fun run() {
+            checkListenProgress()
+        }
+    }
 
     private val saveQueueTask = Runnable { saveQueueNow() }
 
@@ -134,7 +149,13 @@ class PlaybackService : MediaSessionService() {
             ) {
                 savePositionNow()
             }
-            if (events.contains(Player.EVENT_IS_PLAYING_CHANGED)) updatePositionTicker()
+            if (events.contains(Player.EVENT_MEDIA_ITEM_TRANSITION)) {
+                onTrackTransitionForHistory(eventPlayer)
+            }
+            if (events.contains(Player.EVENT_IS_PLAYING_CHANGED)) {
+                onPlayingChangedForHistory(eventPlayer)
+                updatePositionTicker()
+            }
         }
     }
 
@@ -241,6 +262,7 @@ class PlaybackService : MediaSessionService() {
             }
             player = newActive
             session?.player = newActive
+            onTrackTransitionForHistory(newActive)
             savePositionNow()
             updatePositionTicker()
         }
@@ -264,6 +286,8 @@ class PlaybackService : MediaSessionService() {
     }
 
     override fun onDestroy() {
+        checkListenProgress()
+        main.removeCallbacks(listenCheckTask)
         main.removeCallbacks(savePositionTask)
         main.removeCallbacks(sleepTickTask)
         saveQueueNow()
@@ -472,6 +496,82 @@ class PlaybackService : MediaSessionService() {
         if (player?.isPlaying == true) main.postDelayed(savePositionTask, POSITION_SAVE_INTERVAL_MS)
     }
 
+    // ------------------------------------------------------------------ listen tracking
+
+    private fun onTrackTransitionForHistory(activePlayer: Player) {
+        checkListenProgress()
+        val item = activePlayer.currentMediaItem
+        val mediaId = item?.mediaId.orEmpty()
+        val uid = if (item != null) QueueCommands.uidOf(item) else 0L
+        if (mediaId == trackedMediaId && uid == trackedUid) return
+        trackedMediaId = mediaId
+        trackedUid = uid
+        trackedAccumulatedMs = 0L
+        trackedCounted = false
+        trackedPlayStartElapsedMs = if (activePlayer.isPlaying) SystemClock.elapsedRealtime() else 0L
+        scheduleListenCheck()
+    }
+
+    private fun onPlayingChangedForHistory(activePlayer: Player) {
+        val item = activePlayer.currentMediaItem
+        val mediaId = item?.mediaId.orEmpty()
+        val uid = if (item != null) QueueCommands.uidOf(item) else 0L
+        if (mediaId != trackedMediaId || uid != trackedUid) {
+            onTrackTransitionForHistory(activePlayer)
+            return
+        }
+        val now = SystemClock.elapsedRealtime()
+        if (activePlayer.isPlaying) {
+            if (trackedPlayStartElapsedMs == 0L) trackedPlayStartElapsedMs = now
+            checkListenProgress()
+        } else {
+            if (trackedPlayStartElapsedMs > 0L) {
+                trackedAccumulatedMs += (now - trackedPlayStartElapsedMs).coerceAtLeast(0L)
+                trackedPlayStartElapsedMs = 0L
+            }
+            checkListenProgress()
+            main.removeCallbacks(listenCheckTask)
+        }
+    }
+
+    private fun checkListenProgress() {
+        main.removeCallbacks(listenCheckTask)
+        val exo = player ?: return
+        if (trackedCounted || !trackedMediaId.startsWith(CONTENT_PREFIX)) return
+        val now = SystemClock.elapsedRealtime()
+        if (exo.isPlaying && trackedPlayStartElapsedMs > 0L) {
+            trackedAccumulatedMs += (now - trackedPlayStartElapsedMs).coerceAtLeast(0L)
+            trackedPlayStartElapsedMs = now
+        }
+        val clip = exo.currentMediaItem?.clippingConfiguration
+        val clipDuration = if (clip != null && clip.endPositionMs != C.TIME_END_OF_SOURCE && clip.endPositionMs > clip.startPositionMs) {
+            clip.endPositionMs - clip.startPositionMs
+        } else {
+            0L
+        }
+        val playerDuration = exo.duration.takeIf { it != C.TIME_UNSET && it > 0L } ?: 0L
+        val repoTrackDuration = LibraryRepository.get(this).findTrack(trackedMediaId)?.durationMs ?: 0L
+        val effectiveDuration = when {
+            clipDuration > 0L -> clipDuration
+            playerDuration > 0L -> playerDuration
+            else -> repoTrackDuration
+        }
+        val requiredMs = ListeningHistoryStore.requiredListenMs(effectiveDuration)
+        if (trackedAccumulatedMs >= requiredMs) {
+            trackedCounted = true
+            LibraryRepository.get(this).history.recordPlay(trackedMediaId)
+            return
+        }
+        scheduleListenCheck()
+    }
+
+    private fun scheduleListenCheck() {
+        main.removeCallbacks(listenCheckTask)
+        if (!trackedCounted && trackedMediaId.startsWith(CONTENT_PREFIX) && player?.isPlaying == true) {
+            main.postDelayed(listenCheckTask, LISTEN_CHECK_INTERVAL_MS)
+        }
+    }
+
     /** Puts the saved queue back, paused, unless something is already queued. */
     private fun restoreLast(): ListenableFuture<SessionResult> {
         val store = memory
@@ -650,6 +750,7 @@ class PlaybackService : MediaSessionService() {
         const val NOTHING_SAVED = "no saved queue to resume"
         const val QUEUE_SAVE_DELAY_MS = 1000L
         const val POSITION_SAVE_INTERVAL_MS = 5000L
+        const val LISTEN_CHECK_INTERVAL_MS = 2000L
         const val SLEEP_TICK_MS = 1000L
         const val SLEEP_FADE_MS = 5000L
         const val OPEN_PLAYER_REQUEST = 1

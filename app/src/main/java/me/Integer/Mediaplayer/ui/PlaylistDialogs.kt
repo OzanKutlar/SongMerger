@@ -129,8 +129,10 @@ object PlaylistDialogs {
         val popup = PopupMenu(context, anchor)
         popup.menu.add(0, ID_PLAY, 0, R.string.library_play_all)
         popup.menu.add(0, ID_SHUFFLE, 1, R.string.library_shuffle_all)
-        popup.menu.add(0, ID_RENAME, 2, R.string.playlist_rename)
-        popup.menu.add(0, ID_DELETE, 3, R.string.playlist_delete)
+        if (playlist.id > 0L) {
+            popup.menu.add(0, ID_RENAME, 2, R.string.playlist_rename)
+            popup.menu.add(0, ID_DELETE, 3, R.string.playlist_delete)
+        }
         popup.setOnMenuItemClickListener { item ->
             when (item.itemId) {
                 ID_PLAY -> if (playlist.isMix) {

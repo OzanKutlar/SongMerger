@@ -47,6 +47,24 @@
     </plurals>
     <string name="library_playlists_empty">No playlists yet. Tap + to create one.</string>
 
+    <!-- System Playlists & Recaps -->
+    <string name="sys_playlist_favorites">Favorites</string>
+    <string name="sys_playlist_most_listened">Most Listened</string>
+    <string name="sys_playlist_most_week">Most Listened This Week</string>
+    <string name="sys_playlist_most_month">Most Listened This Month</string>
+    <string name="sys_section_recaps">Recaps</string>
+    <string name="recap_winter">Winter %1$d Recap</string>
+    <string name="recap_spring">Spring %1$d Recap</string>
+    <string name="recap_summer">Summer %1$d Recap</string>
+    <string name="recap_autumn">Autumn %1$d Recap</string>
+    <string name="recap_month_format">%1$s %2$d Recap</string>
+    <string name="sys_playlist_empty">No listening activity recorded for this period yet. Listen to at least half of a song to track it here.</string>
+    <plurals name="listen_play_count">
+        <item quantity="one">%1$d play</item>
+        <item quantity="other">%1$d plays</item>
+    </plurals>
+    <string name="listen_stats_line">%1$s &#183; %2$s (%3$d min)</string>
+
     <!-- Song & Player menus -->
     <string name="menu_more">More options</string>
     <string name="menu_play_next">Play next</string>

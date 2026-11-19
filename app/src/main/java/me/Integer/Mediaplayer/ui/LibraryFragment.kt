@@ -53,6 +53,7 @@ class LibraryFragment : Fragment(R.layout.fragment_library), LibraryRepository.L
     private lateinit var artistAdapter: ArtistAdapter
     private lateinit var albumAdapter: AlbumAdapter
     private lateinit var playlistAdapter: PlaylistAdapter
+    private lateinit var favoritesAdapter: FavoritesShowcaseAdapter
     private lateinit var list: RecyclerView
     private lateinit var emptyView: TextView
     private lateinit var scanView: TextView
@@ -96,6 +97,7 @@ class LibraryFragment : Fragment(R.layout.fragment_library), LibraryRepository.L
     private var tabsStyled = false
     private var initialBatchReady = false
     private var shownPlaylistCount = 0
+    private var shownFavoritesPlaylistCount = 0
     private var lastRowCount = 0
     private var visibleTracks: List<Track> = emptyList()
 
@@ -203,11 +205,21 @@ class LibraryFragment : Fragment(R.layout.fragment_library), LibraryRepository.L
     }
 
     private fun updateLayoutManager() {
-        val wantGrid = activeTab == TAB_PLAYLISTS || activeTab == TAB_ARTISTS
+        val wantGrid = activeTab == TAB_PLAYLISTS || activeTab == TAB_ARTISTS || activeTab == TAB_FAVORITES
         val current = list.layoutManager
         val isGrid = current is GridLayoutManager
         if (wantGrid && !isGrid) {
-            list.layoutManager = GridLayoutManager(requireContext(), GRID_SPAN_COUNT)
+            val grid = GridLayoutManager(requireContext(), GRID_SPAN_COUNT)
+            grid.spanSizeLookup = object : GridLayoutManager.SpanSizeLookup() {
+                override fun getSpanSize(position: Int): Int {
+                    return if (activeTab == TAB_FAVORITES && ::favoritesAdapter.isInitialized) {
+                        favoritesAdapter.spanSizeAt(position, GRID_SPAN_COUNT)
+                    } else {
+                        1
+                    }
+                }
+            }
+            list.layoutManager = grid
         } else if (!wantGrid && (current == null || isGrid)) {
             list.layoutManager = LinearLayoutManager(requireContext())
         }
@@ -222,6 +234,7 @@ class LibraryFragment : Fragment(R.layout.fragment_library), LibraryRepository.L
             TAB_ARTISTS -> FastScroller.initialOf(artistAdapter.rows().getOrNull(index)?.name)
             TAB_ALBUMS -> FastScroller.initialOf(albumAdapter.rows().getOrNull(index)?.name)
             TAB_PLAYLISTS -> FastScroller.initialOf(playlistAdapter.rows().getOrNull(index)?.name)
+            TAB_FAVORITES -> FastScroller.initialOf(favoritesAdapter.sectionLabelAt(index))
             else -> {
                 val track = trackAdapter.rows().getOrNull(index) ?: return "#"
                 if (repository.settings.trackSort == TrackSorter.BY_ARTIST) {
@@ -248,8 +261,14 @@ class LibraryFragment : Fragment(R.layout.fragment_library), LibraryRepository.L
         )
         artistAdapter = ArtistAdapter(thumbnails) { artist -> navigator.openArtist(artist.name) }
         albumAdapter = AlbumAdapter(thumbnails) { album -> navigator.openAlbum(album.name) }
+        val covers = PlaylistCoverLoader.get(requireContext())
         playlistAdapter = PlaylistAdapter(
-            covers = PlaylistCoverLoader.get(requireContext()),
+            covers = covers,
+            onClick = { playlist -> navigator.openPlaylist(playlist.id) },
+            onMenu = { playlist, anchor -> PlaylistDialogs.showRowMenu(anchor, playlist, host, repository) }
+        )
+        favoritesAdapter = FavoritesShowcaseAdapter(
+            covers = covers,
             onClick = { playlist -> navigator.openPlaylist(playlist.id) },
             onMenu = { playlist, anchor -> PlaylistDialogs.showRowMenu(anchor, playlist, host, repository) }
         )
@@ -509,9 +528,9 @@ class LibraryFragment : Fragment(R.layout.fragment_library), LibraryRepository.L
                 refreshPlaylists(gen, libVer, needle)
             }
             TAB_FAVORITES -> {
-                if (trackAdapter.rows().isEmpty()) showSkeleton()
+                if (favoritesAdapter.rows().isEmpty()) showSkeleton()
                 renderCardHeader()
-                refreshSongs(gen, libVer, favoritesOnly = true, needle = needle)
+                refreshFavoritesShowcase(gen, libVer, needle)
             }
             else -> {
                 if (trackAdapter.rows().isEmpty()) showSkeleton()
@@ -535,6 +554,10 @@ class LibraryFragment : Fragment(R.layout.fragment_library), LibraryRepository.L
             TAB_PLAYLISTS -> {
                 playlistAdapter.setLoading(true)
                 if (list.adapter !== playlistAdapter) list.adapter = playlistAdapter
+            }
+            TAB_FAVORITES -> {
+                favoritesAdapter.setLoading(true)
+                if (list.adapter !== favoritesAdapter) list.adapter = favoritesAdapter
             }
             else -> {
                 trackAdapter.setLoading(true)
@@ -624,6 +647,43 @@ class LibraryFragment : Fragment(R.layout.fragment_library), LibraryRepository.L
         }
     }
 
+    private fun refreshFavoritesShowcase(gen: Long, libVer: Long, needle: String) {
+        val recapsHeader = getString(R.string.sys_section_recaps)
+        worker.execute {
+            val showcase = repository.favoritesShowcase()
+            val pinned = if (needle.isEmpty()) {
+                showcase.pinned
+            } else {
+                showcase.pinned.filter { it.name.lowercase(Locale.ROOT).contains(needle) }
+            }
+            val recaps = if (needle.isEmpty()) {
+                showcase.recaps
+            } else {
+                showcase.recaps.filter { it.name.lowercase(Locale.ROOT).contains(needle) }
+            }
+            val rows = ArrayList<FavoritesShowcaseAdapter.Row>(pinned.size + recaps.size + 1)
+            for (playlist in pinned) {
+                rows.add(FavoritesShowcaseAdapter.Row.PlaylistCard(playlist))
+            }
+            if (recaps.isNotEmpty()) {
+                rows.add(FavoritesShowcaseAdapter.Row.SectionHeader(recapsHeader))
+                for (recap in recaps) {
+                    rows.add(FavoritesShowcaseAdapter.Row.PlaylistCard(recap))
+                }
+            }
+            val totalCards = pinned.size + recaps.size
+            main.post {
+                if (!isAdded || gen != refreshGeneration) return@post
+                initialBatchReady = true
+                shownFavoritesPlaylistCount = totalCards
+                lastDiffLibVersion = libVer
+                favoritesAdapter.submit(rows)
+                if (list.adapter !== favoritesAdapter) list.adapter = favoritesAdapter
+                onRowsReady(totalCards)
+            }
+        }
+    }
+
     private fun refreshPlaylists(gen: Long, libVer: Long, needle: String) {
         val oldRows = if (list.adapter === playlistAdapter && !playlistAdapter.isLoading) playlistAdapter.rows() else emptyList()
         val canDiff = oldRows.isNotEmpty() && lastDiffLibVersion == libVer
@@ -699,8 +759,9 @@ class LibraryFragment : Fragment(R.layout.fragment_library), LibraryRepository.L
     }
 
     private fun renderCardHeader() {
-        val showingSongs = activeTab == TAB_SONGS || activeTab == TAB_FAVORITES
+        val showingSongs = activeTab == TAB_SONGS
         val showingPlaylists = activeTab == TAB_PLAYLISTS
+        val showingFavorites = activeTab == TAB_FAVORITES
         val buttons = if (showingSongs) View.VISIBLE else View.GONE
         shuffleButton.visibility = buttons
         playAllButton.visibility = buttons
@@ -724,12 +785,19 @@ class LibraryFragment : Fragment(R.layout.fragment_library), LibraryRepository.L
                 params.width = ViewGroup.LayoutParams.WRAP_CONTENT
                 sortLabel.layoutParams = params
             }
-            sortIcon.visibility = if (showingPlaylists) View.GONE else View.VISIBLE
-            sortButton.isClickable = !showingPlaylists
+            val nonSortable = showingPlaylists || showingFavorites
+            sortIcon.visibility = if (nonSortable) View.GONE else View.VISIBLE
+            sortButton.isClickable = !nonSortable
             sortLabel.text = when {
                 showingSongs -> getString(TRACK_SORT_LABELS[repository.settings.trackSort])
                 showingPlaylists ->
                     resources.getQuantityString(R.plurals.library_playlist_count, shownPlaylistCount, shownPlaylistCount)
+                showingFavorites ->
+                    resources.getQuantityString(
+                        R.plurals.library_playlist_count,
+                        shownFavoritesPlaylistCount,
+                        shownFavoritesPlaylistCount
+                    )
                 activeTab == TAB_ALBUMS -> getString(ALBUM_SORT_LABELS[repository.settings.albumSort])
                 else -> getString(ARTIST_SORT_LABELS[repository.settings.artistSort])
             }

@@ -14,6 +14,7 @@ import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import me.Integer.Mediaplayer.R
 import me.Integer.Mediaplayer.library.LibraryRepository
+import me.Integer.Mediaplayer.library.ListeningHistoryStore
 import me.Integer.Mediaplayer.library.M3uCodec
 import me.Integer.Mediaplayer.library.MixSegment
 import me.Integer.Mediaplayer.library.Playlist
@@ -54,8 +55,14 @@ class PlaylistFragment : Fragment(R.layout.fragment_playlist), LibraryRepository
     /** Per song, the parts of it the mashup plays, such as 0:33 to 2:45. */
     private var cueText: Map<String, String> = emptyMap()
 
+    /** Per song, listen stats when viewing a system/recap playlist. */
+    private var listenStats: Map<String, ListeningHistoryStore.TrackListenStats> = emptyMap()
+
     private val playlistId: Long
         get() = arguments?.getLong(ARG_ID) ?: 0L
+
+    private val isSystemPlaylist: Boolean
+        get() = ListeningHistoryStore.isSystemPlaylist(playlistId)
 
     private val pickImage =
         registerForActivityResult(ActivityResultContracts.GetContent()) { uri -> onImagePicked(uri) }
@@ -154,15 +161,23 @@ class PlaylistFragment : Fragment(R.layout.fragment_playlist), LibraryRepository
 
     private fun refresh() {
         if (dragging) return
-        val playlist = repository.playlists.get(playlistId)
+        val playlist = repository.getPlaylistOrSystem(playlistId)
         tracks = if (playlist == null) emptyList() else repository.resolveTracks(playlist.trackUris)
         mix = playlist?.segments.orEmpty()
         cueText = cuesOf(mix)
+        listenStats = repository.systemPlaylistStats(playlistId)
         adapter.submit(tracks)
         selectionController.onRowsChanged()
         nameView.text = playlist?.name.orEmpty()
         val songCount = resources.getQuantityString(R.plurals.library_song_count, tracks.size, tracks.size)
         countView.text = if (mix.isEmpty()) songCount else getString(R.string.playlist_mix_count, songCount, mix.size)
+        emptyView.setText(
+            when {
+                playlistId == ListeningHistoryStore.ID_FAVORITES -> R.string.library_favorites_empty
+                isSystemPlaylist -> R.string.sys_playlist_empty
+                else -> R.string.playlist_empty
+            }
+        )
         emptyView.visibility = if (tracks.isEmpty()) View.VISIBLE else View.GONE
         covers.bind(coverView, playlist)
         val usable = tracks.isNotEmpty()
@@ -186,8 +201,15 @@ class PlaylistFragment : Fragment(R.layout.fragment_playlist), LibraryRepository
 
     private fun artistLineOf(track: Track): String {
         val artist = repository.displayArtist(track).ifEmpty { getString(R.string.library_unknown_artist) }
-        val cues = cueText[track.uri] ?: return artist
-        return getString(R.string.playlist_mix_cues, artist, cues)
+        val cues = cueText[track.uri]
+        if (cues != null) return getString(R.string.playlist_mix_cues, artist, cues)
+        val stats = listenStats[track.uri]
+        if (stats != null && stats.playCount > 0 && playlistId != ListeningHistoryStore.ID_FAVORITES) {
+            val plays = resources.getQuantityString(R.plurals.listen_play_count, stats.playCount, stats.playCount)
+            val minutes = (stats.listenedMs / 60_000L).coerceAtLeast(1L)
+            return getString(R.string.listen_stats_line, artist, plays, minutes)
+        }
+        return artist
     }
 
     private fun cuesOf(steps: List<MixSegment>): Map<String, String> {
@@ -205,15 +227,19 @@ class PlaylistFragment : Fragment(R.layout.fragment_playlist), LibraryRepository
     // ------------------------------------------------------------------ menus
 
     private fun showMoreMenu(anchor: View) {
-        val playlist = repository.playlists.get(playlistId) ?: return
+        val playlist = repository.getPlaylistOrSystem(playlistId) ?: return
         val popup = PopupMenu(requireContext(), anchor)
         popup.menu.add(0, ID_SELECT, 0, R.string.queue_select)
-        popup.menu.add(0, ID_RENAME, 0, R.string.playlist_rename)
-        popup.menu.add(0, ID_COVER, 1, R.string.playlist_change_cover)
-        popup.menu.add(0, ID_EDIT_ROUTE, 2, R.string.mashup_edit_route)
+        if (!isSystemPlaylist) {
+            popup.menu.add(0, ID_RENAME, 0, R.string.playlist_rename)
+            popup.menu.add(0, ID_COVER, 1, R.string.playlist_change_cover)
+            popup.menu.add(0, ID_EDIT_ROUTE, 2, R.string.mashup_edit_route)
+        }
         popup.menu.add(0, ID_EXPORT_M3U, 3, R.string.playlist_export_m3u)
-        popup.menu.add(0, ID_MASHUP, 4, R.string.mashup_from_playlist)
-        popup.menu.add(0, ID_DELETE, 5, R.string.playlist_delete)
+        if (!isSystemPlaylist) {
+            popup.menu.add(0, ID_MASHUP, 4, R.string.mashup_from_playlist)
+            popup.menu.add(0, ID_DELETE, 5, R.string.playlist_delete)
+        }
         popup.setOnMenuItemClickListener { item ->
             when (item.itemId) {
                 ID_SELECT -> selectionController.enter(RecyclerView.NO_POSITION)
@@ -230,7 +256,7 @@ class PlaylistFragment : Fragment(R.layout.fragment_playlist), LibraryRepository
     }
 
     private fun writeM3uToUri(uri: Uri) {
-        val playlist = repository.playlists.get(playlistId) ?: return
+        val playlist = repository.getPlaylistOrSystem(playlistId) ?: return
         val content = M3uCodec.encode(
             playlist,
             trackOf = { repository.findTrack(it) },
@@ -251,15 +277,19 @@ class PlaylistFragment : Fragment(R.layout.fragment_playlist), LibraryRepository
     private fun showTrackMenu(track: Track, anchor: View) {
         val context = requireContext()
         val id = playlistId
-        val playlist = repository.playlists.get(id)
+        val playlist = repository.getPlaylistOrSystem(id)
         val popup = PopupMenu(context, anchor)
         popup.menu.add(0, ID_PLAY_NEXT, 0, R.string.menu_play_next)
         popup.menu.add(0, ID_ADD_QUEUE, 1, R.string.menu_add_queue)
-        if (playlist?.isMix == true) {
+        if (playlist?.isMix == true && !isSystemPlaylist) {
             popup.menu.add(0, ID_EDIT_STEP, 2, R.string.mashup_edit_step)
         }
-        popup.menu.add(0, ID_USE_COVER, 3, R.string.playlist_use_cover)
-        popup.menu.add(0, ID_REMOVE, 4, R.string.playlist_remove_track)
+        if (!isSystemPlaylist) {
+            popup.menu.add(0, ID_USE_COVER, 3, R.string.playlist_use_cover)
+            popup.menu.add(0, ID_REMOVE, 4, R.string.playlist_remove_track)
+        } else if (id == ListeningHistoryStore.ID_FAVORITES) {
+            popup.menu.add(0, ID_REMOVE, 4, R.string.menu_remove_favorite)
+        }
         popup.menu.add(0, ID_DETAILS, 5, R.string.menu_track_details)
         popup.setOnMenuItemClickListener { item ->
             when (item.itemId) {
@@ -267,7 +297,11 @@ class PlaylistFragment : Fragment(R.layout.fragment_playlist), LibraryRepository
                 ID_ADD_QUEUE -> host.connection.addToQueue(track, repository.displayArtist(track))
                 ID_EDIT_STEP -> if (playlist != null) MashupStepDialog.showStepEditor(context, repository, playlist, track)
                 ID_USE_COVER -> repository.playlists.setCover(id, Playlist.COVER_TRACK, track.uri)
-                ID_REMOVE -> repository.playlists.removeTrack(id, track.uri)
+                ID_REMOVE -> if (id == ListeningHistoryStore.ID_FAVORITES) {
+                    repository.removeFavorites(listOf(track.uri))
+                } else {
+                    repository.playlists.removeTrack(id, track.uri)
+                }
                 ID_DETAILS -> TrackDetailsDialog.show(context, repository, track)
             }
             true
@@ -278,6 +312,7 @@ class PlaylistFragment : Fragment(R.layout.fragment_playlist), LibraryRepository
     // ------------------------------------------------------------------ cover
 
     private fun changeCover() {
+        if (isSystemPlaylist) return
         val playlist = repository.playlists.get(playlistId) ?: return
         PlaylistDialogs.chooseCover(requireContext(), repository, playlist) { pickImage.launch(IMAGE_TYPE) }
     }
@@ -325,9 +360,9 @@ class PlaylistFragment : Fragment(R.layout.fragment_playlist), LibraryRepository
                 return true
             }
 
-            /** A mashup keeps the order its transitions were chosen for. */
+            /** A mashup or system playlist keeps its order. */
             override fun getDragDirs(recyclerView: RecyclerView, viewHolder: RecyclerView.ViewHolder): Int {
-                val canDrag = mix.isEmpty() && !trackSelection.isActive
+                val canDrag = mix.isEmpty() && !trackSelection.isActive && !isSystemPlaylist
                 return if (canDrag) super.getDragDirs(recyclerView, viewHolder) else 0
             }
 
