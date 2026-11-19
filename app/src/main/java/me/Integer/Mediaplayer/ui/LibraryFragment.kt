@@ -321,7 +321,7 @@ class LibraryFragment : Fragment(R.layout.fragment_library), LibraryRepository.L
                 ID_QUEUE -> navigator.openQueue()
                 ID_IMPORT -> ImportPlaylistDialog.startFlow(requireContext(), repository, host)
                 ID_IMPORT_M3U -> pickM3uFile.launch(arrayOf("audio/x-mpegurl", "application/vnd.apple.mpegurl", "text/plain", "*/*"))
-                ID_MASHUP -> AiMashupDialog.startFlow(requireContext(), repository, host)
+                ID_MASHUP -> navigator.openAiMashupMenu()
                 ID_RESCAN -> repository.rescan()
                 ID_SETTINGS -> navigator.openSettings()
             }

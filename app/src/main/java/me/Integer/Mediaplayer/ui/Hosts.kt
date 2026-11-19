@@ -66,6 +66,8 @@ interface Navigator {
 
     fun openSettings()
 
+    fun openAiMashupMenu(sourcePlaylistId: Long = AiMashupMenuFragment.NO_PLAYLIST)
+
     fun goBack()
 }
 

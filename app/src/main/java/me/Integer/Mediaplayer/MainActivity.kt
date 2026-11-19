@@ -21,6 +21,7 @@ import me.Integer.Mediaplayer.library.Track
 import me.Integer.Mediaplayer.playback.NowPlaying
 import me.Integer.Mediaplayer.playback.NowPlayingListener
 import me.Integer.Mediaplayer.playback.PlayerConnection
+import me.Integer.Mediaplayer.ui.AiMashupMenuFragment
 import me.Integer.Mediaplayer.ui.AlbumFragment
 import me.Integer.Mediaplayer.ui.ArtistFragment
 import me.Integer.Mediaplayer.ui.LibraryFragment
@@ -69,7 +70,7 @@ class MainActivity : AppCompatActivity(), PlayerHost, Navigator, NowPlayingListe
     private val screenWatcher = object : FragmentManager.FragmentLifecycleCallbacks() {
         override fun onFragmentResumed(fm: FragmentManager, f: Fragment) {
             if (f.id != R.id.mainContainer) return
-            val hide = f is NowPlayingFragment || f is SettingsFragment
+            val hide = f is NowPlayingFragment || f is SettingsFragment || f is AiMashupMenuFragment
             miniBar.setSuppressed(hide)
         }
     }
@@ -254,6 +255,12 @@ class MainActivity : AppCompatActivity(), PlayerHost, Navigator, NowPlayingListe
         open(KEY_SETTINGS, STYLE_SIDE) { SettingsFragment() }
     }
 
+    override fun openAiMashupMenu(sourcePlaylistId: Long) {
+        open(KEY_AI_MENU + sourcePlaylistId, STYLE_SIDE) {
+            AiMashupMenuFragment.create(sourcePlaylistId)
+        }
+    }
+
     override fun goBack() {
         onBackPressedDispatcher.onBackPressed()
     }
@@ -311,6 +318,7 @@ class MainActivity : AppCompatActivity(), PlayerHost, Navigator, NowPlayingListe
         // Back stack names: one entry per screen, so a screen is never stacked twice.
         private const val KEY_PLAYER = "player"
         private const val KEY_SETTINGS = "settings"
+        private const val KEY_AI_MENU = "ai_menu:"
         private const val KEY_ARTIST = "artist:"
         private const val KEY_ALBUM = "album:"
         private const val KEY_PLAYLIST = "playlist:"

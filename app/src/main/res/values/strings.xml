@@ -148,7 +148,47 @@
     <string name="import_complete_title">Import complete</string>
     <string name="import_complete_body">Matched %1$d of %2$d songs into %3$s.</string>
 
-    <!-- AI mashups -->
+    <!-- AI mashups & LLM Suggested Playlists -->
+    <string name="ai_menu_header_title">Generate AI mashups</string>
+    <string name="ai_menu_section_modes">Mashup &amp; playlist modes</string>
+    <string name="ai_menu_scope_device">Library ready &#183; %1$s on device</string>
+    <string name="ai_menu_scope_playlist">Source playlist: %1$s (%2$s)</string>
+    <string name="ai_menu_local_server_title">Local Server Mashup</string>
+    <string name="ai_menu_local_server_sub">Beat-matched DJ transitions analysed on your local AI router server</string>
+    <string name="ai_menu_llm_title">LLM Suggested Playlists</string>
+    <string name="ai_menu_llm_sub">LLM Generated Mashup &#183; Generate an instruction set for an LLM chat interface to research genres and moods and output JSON playlists</string>
+    <string name="ai_menu_llm_action">Generate LLM prompt or import playlist JSONs</string>
+    <string name="llm_playlist_title">LLM Suggested Playlists</string>
+    <string name="llm_playlist_description">Generates an instruction set for an LLM chat interface (ChatGPT, Gemini, Claude, etc.) to research the genre and mood of each song on your device and output named playlist JSONs with no emojis.</string>
+    <string name="llm_playlist_source_value">Songs to include: %1$s (%2$d)  (tap to change)</string>
+    <string name="llm_playlist_count_auto">Playlists to suggest: Automatic (3–6)</string>
+    <string name="llm_playlist_count_exact">Playlists to suggest: %1$d</string>
+    <string name="llm_playlist_generate_btn">Generate instruction set</string>
+    <string name="llm_playlist_import_btn">Import JSON</string>
+    <string name="llm_playlist_share_btn">Share&#8230;</string>
+    <string name="llm_playlist_no_tracks">No songs available to build the instruction set</string>
+    <string name="llm_playlist_prompt_title">LLM instruction set</string>
+    <string name="llm_playlist_prompt_ready">Copied to clipboard (%1$d songs included). Paste this into your LLM chat interface, then use Import JSON with its reply.</string>
+    <string name="llm_playlist_prompt_truncated">Copied to clipboard (first %1$d of %2$d songs included to fit prompt size limits).</string>
+    <string name="llm_playlist_copied">LLM instruction set copied to clipboard</string>
+    <string name="llm_playlist_copy_failed">Could not copy to clipboard; use Share instead</string>
+    <string name="llm_playlist_import_title">Import LLM playlist JSONs</string>
+    <string name="llm_playlist_import_help">Paste the LLM reply containing one or more playlist JSON objects. Emojis are removed from playlist names automatically.</string>
+    <string name="llm_playlist_import_hint">{\n  "name": "A Streak through the 90s",\n  "tracks": [\n    { "title": "Around the World", "artist": "Daft Punk" }\n  ]\n}</string>
+    <string name="llm_playlist_parse_btn">Preview playlists</string>
+    <string name="llm_playlist_paste_btn">Paste clipboard</string>
+    <string name="llm_playlist_parse_empty">Could not find any valid playlist JSONs in that text</string>
+    <plurals name="llm_playlist_found">
+        <item quantity="one">%1$d suggested playlist</item>
+        <item quantity="other">%1$d suggested playlists</item>
+    </plurals>
+    <string name="llm_playlist_row_title">%1$s  &#183;  %2$d / %3$d songs matched</string>
+    <string name="llm_playlist_row_no_matches">No matching songs found in your library</string>
+    <string name="llm_playlist_save_failed">Could not save playlist (no matching songs in library)</string>
+    <plurals name="llm_playlist_saved_many">
+        <item quantity="one">Saved %1$d LLM playlist</item>
+        <item quantity="other">Saved %1$d LLM playlists</item>
+    </plurals>
     <string name="mashup_title">AI mashups</string>
     <string name="mashup_from_playlist">Make AI mashups</string>
     <string name="mashup_source_title">Make mashups from</string>

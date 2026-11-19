@@ -222,7 +222,7 @@ class PlaylistFragment : Fragment(R.layout.fragment_playlist), LibraryRepository
                 ID_EDIT_ROUTE -> MashupStepDialog.showRouteEditor(requireContext(), repository, playlist)
                 ID_EXPORT_M3U -> exportM3uLauncher.launch("${playlist.name}.m3u8")
                 ID_DELETE -> PlaylistDialogs.confirmDelete(requireContext(), repository, playlist) { navigator.goBack() }
-                ID_MASHUP -> AiMashupDialog.startFrom(requireContext(), repository, host, tracks)
+                ID_MASHUP -> navigator.openAiMashupMenu(playlistId)
             }
             true
         }
