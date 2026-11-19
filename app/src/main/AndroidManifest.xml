@@ -48,6 +48,15 @@
             android:exported="false"
             android:foregroundServiceType="dataSync" />
 
+        <!-- Lets other apps (such as a Termux download script) add one new song by its file name -->
+        <receiver
+            android:name=".library.AddTrackReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="me.Integer.Mediaplayer.ADD_TRACK" />
+            </intent-filter>
+        </receiver>
+
         <!-- Lets a headset or Bluetooth play button wake the app and resume the last queue -->
         <receiver
             android:name="androidx.media3.session.MediaButtonReceiver"

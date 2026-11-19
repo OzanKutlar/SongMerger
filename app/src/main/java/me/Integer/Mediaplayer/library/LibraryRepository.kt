@@ -27,6 +27,9 @@ class LibraryRepository private constructor(appContext: Context) {
     /** [total] is 0 while the folders are still being listed. */
     data class ScanState(val running: Boolean, val done: Int, val total: Int)
 
+    /** What [importByName] did with one file name. */
+    enum class ImportOutcome { ADDED, UPDATED, NOT_FOUND, NO_FOLDERS }
+
     val settings = PlayerSettings(appContext)
     val folders = MusicFolderStore(appContext)
     val overrides = ArtistOverrides(appContext)
@@ -101,6 +104,55 @@ class LibraryRepository private constructor(appContext: Context) {
 
     fun cancelScan() {
         cancelled.set(true)
+    }
+
+    /**
+     * Adds the song file called [fileName] from the picked folders, without a rescan. It runs
+     * on the library worker after any load or scan already waiting there, so it never overlaps
+     * them. [done] gets the outcome on the main thread.
+     */
+    fun importByName(fileName: String, done: (ImportOutcome) -> Unit) {
+        val roots = folders.folders().map { it.uri }
+        if (roots.isEmpty()) {
+            done(ImportOutcome.NO_FOLDERS)
+            return
+        }
+        worker.execute { runImport(roots, fileName, done) }
+    }
+
+    /**
+     * Worker thread. The saved index is the base: every scan and import saves it on this same
+     * thread, and it works even when the app was started only for this import.
+     */
+    private fun runImport(roots: List<Uri>, fileName: String, done: (ImportOutcome) -> Unit) {
+        val found = try {
+            scanner.findByName(roots, fileName, AtomicBoolean(false))
+        } catch (e: RuntimeException) {
+            Log.e(TAG, "looking for $fileName failed", e)
+            emptyList()
+        }
+        if (found.isEmpty()) {
+            main.post { done(ImportOutcome.NOT_FOUND) }
+            return
+        }
+        val base = index.load().ifEmpty { tracks }
+        val known = base.mapTo(HashSet()) { it.uri }
+        val replaced = found.any { it.uri in known }
+        val merged = mergeTracks(base, found)
+        if (!index.save(merged)) Log.w(TAG, "$fileName is shown but could not be cached")
+        main.post {
+            isLoaded = true
+            publish(merged)
+            done(if (replaced) ImportOutcome.UPDATED else ImportOutcome.ADDED)
+        }
+    }
+
+    /** [base] with [found] added, or replacing the same file, sorted by title like a scan. */
+    private fun mergeTracks(base: List<Track>, found: List<Track>): List<Track> {
+        val byUri = LinkedHashMap<String, Track>(base.size + found.size)
+        for (track in base) byUri[track.uri] = track
+        for (track in found) byUri[track.uri] = track
+        return byUri.values.sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER) { it.title })
     }
 
     /** Worker thread. Reads the cache itself, so a scan right after launch stays incremental. */

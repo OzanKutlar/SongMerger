@@ -53,6 +53,107 @@ class LibraryScanner(context: Context, private val tagReader: TagReader) {
         return tracks.sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER) { it.title })
     }
 
+    // ------------------------------------------------------------------ one file by name
+
+    /**
+     * Songs called [fileName] (ignoring case; an exact-case match wins) in the picked [folders].
+     * The top level of every folder is checked first; only when nothing is there are their
+     * subfolders searched, stopping at the first folder with a match. Only matches have
+     * their tags read.
+     */
+    fun findByName(folders: List<Uri>, fileName: String, cancelled: AtomicBoolean): List<Track> {
+        if (fileName.isEmpty()) return emptyList()
+        val found = ArrayList<FoundFile>()
+        val subfolders = LinkedHashMap<Uri, MutableList<String>>()
+        for (tree in folders.take(MAX_ROOTS)) {
+            if (cancelled.get()) return emptyList()
+            val rootId = rootIdOf(tree) ?: continue
+            val below = ArrayList<String>()
+            matchChildren(tree, rootId, fileName, found, below)
+            subfolders[tree] = below
+        }
+        if (found.isEmpty()) {
+            for ((tree, start) in subfolders) {
+                if (cancelled.get() || found.isNotEmpty()) break
+                searchBelow(tree, start, fileName, found, cancelled)
+            }
+        }
+        val exact = found.filter { it.name == fileName }
+        return exact.ifEmpty { found }.distinctBy { it.uri }.map { buildTrack(it) }
+    }
+
+    /** Lists one folder: files called [fileName] go to [out], subfolder ids to [subfolders]. */
+    private fun matchChildren(
+        tree: Uri,
+        documentId: String,
+        fileName: String,
+        out: MutableList<FoundFile>,
+        subfolders: MutableList<String>?
+    ) {
+        val children = DocumentsContract.buildChildDocumentsUriUsingTree(tree, documentId)
+        try {
+            resolver.query(children, PROJECTION, null, null, null)?.use { cursor ->
+                var rows = 0
+                while (rows < MAX_CHILDREN && cursor.moveToNext()) {
+                    rows++
+                    matchRow(tree, cursor, fileName, out, subfolders)
+                }
+            }
+        } catch (e: RuntimeException) {
+            // SecurityException when access was revoked, or a failing storage provider.
+            Log.w(TAG, "cannot list $documentId: ${e.message}")
+        }
+    }
+
+    private fun matchRow(
+        tree: Uri,
+        cursor: Cursor,
+        fileName: String,
+        out: MutableList<FoundFile>,
+        subfolders: MutableList<String>?
+    ) {
+        val id = cursor.getString(COLUMN_ID) ?: return
+        val name = cursor.getString(COLUMN_NAME) ?: return
+        if (name.startsWith(".")) return
+        val mime = cursor.getString(COLUMN_MIME)
+        if (mime == Document.MIME_TYPE_DIR) {
+            subfolders?.add(id)
+            return
+        }
+        if (out.size >= MAX_NAME_MATCHES) return
+        if (!name.equals(fileName, ignoreCase = true) || !isAudio(name, mime)) return
+        val uri = DocumentsContract.buildDocumentUriUsingTree(tree, id)
+        out.add(FoundFile(uri, name, cursor.getLong(COLUMN_SIZE), cursor.getLong(COLUMN_MODIFIED), tree.toString()))
+    }
+
+    /** Breadth first below one picked folder, within the usual limits; stops once a match is found. */
+    private fun searchBelow(
+        tree: Uri,
+        start: List<String>,
+        fileName: String,
+        out: MutableList<FoundFile>,
+        cancelled: AtomicBoolean
+    ) {
+        val pending = ArrayDeque<Pair<String, Int>>()
+        for (id in start) pending.addLast(id to 1)
+        for (visited in 0 until MAX_FOLDERS) {
+            if (cancelled.get() || out.isNotEmpty()) return
+            val (documentId, depth) = pending.removeFirstOrNull() ?: return
+            val below = if (depth < MAX_DEPTH) ArrayList<String>() else null
+            matchChildren(tree, documentId, fileName, out, below)
+            below?.forEach { pending.addLast(it to depth + 1) }
+        }
+    }
+
+    private fun rootIdOf(tree: Uri): String? {
+        return try {
+            DocumentsContract.getTreeDocumentId(tree)
+        } catch (e: IllegalArgumentException) {
+            Log.w(TAG, "not a folder: $tree")
+            null
+        }
+    }
+
     // ------------------------------------------------------------------ folder walk
 
     private fun walk(walk: Walk, cancelled: AtomicBoolean) {
@@ -158,6 +259,7 @@ class LibraryScanner(context: Context, private val tagReader: TagReader) {
         const val MAX_CHILDREN = 20000
         const val MAX_FILES = 50000
         const val PROGRESS_STEP = 10
+        const val MAX_NAME_MATCHES = 16
         const val COLUMN_ID = 0
         const val COLUMN_NAME = 1
         const val COLUMN_MIME = 2
