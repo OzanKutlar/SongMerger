@@ -24,6 +24,8 @@ class AlbumFragment : Fragment(R.layout.fragment_artist), LibraryRepository.List
     private lateinit var list: RecyclerView
     private var albumName = ""
     private var tracks: List<Track> = emptyList()
+    private val selection = TrackSelection()
+    private lateinit var selectionController: TrackSelectionController
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
@@ -38,13 +40,18 @@ class AlbumFragment : Fragment(R.layout.fragment_artist), LibraryRepository.List
         adapter = TrackAdapter(
             thumbnails = ThumbnailLoader.get(requireContext()),
             artistLine = { track -> repository.displayArtist(track).ifEmpty { getString(R.string.library_unknown_artist) } },
-            onClick = { index -> host.launchRow(list, tracks, index) },
+            onClick = { index -> if (!selectionController.handleTap(index)) host.launchRow(list, tracks, index) },
             onPlayNext = { track -> TrackMenu.playNext(requireContext(), track, host, repository) },
-            onMenu = { track, anchor -> TrackMenu.show(anchor, track, host, repository) }
+            onMenu = { track, anchor -> TrackMenu.show(anchor, track, host, repository) },
+            selection = selection,
+            onLongPress = { index -> selectionController.enter(index) }
         )
         list = view.findViewById(R.id.artistList)
         list.layoutManager = LinearLayoutManager(requireContext())
         list.adapter = adapter
+        selectionController = TrackSelectionController(
+            this, view, view.findViewById(R.id.artistCardHeader), adapter, selection, host, repository
+        )
         FastScroller.attach(list) { index -> FastScroller.initialOf(tracks.getOrNull(index)?.title) }
     }
 
@@ -84,6 +91,7 @@ class AlbumFragment : Fragment(R.layout.fragment_artist), LibraryRepository.List
     private fun refresh() {
         tracks = repository.tracksInAlbum(albumName)
         adapter.submit(tracks)
+        selectionController.onRowsChanged()
         countView.text = resources.getQuantityString(R.plurals.library_song_count, tracks.size, tracks.size)
     }
 

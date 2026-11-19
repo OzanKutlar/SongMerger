@@ -13,58 +13,49 @@ object SleepTimerDialog {
 
     private val MINUTES = intArrayOf(15, 30, 45, 60)
 
-    fun show(context: Context, connection: PlayerConnection) {
+    /** [onChanged] runs after a choice was sent, so the caller can show the new state at once. */
+    fun show(context: Context, connection: PlayerConnection, onChanged: () -> Unit = {}) {
         val remaining = connection.sleepTimerRemainingMs()
-        val activeLabel = when {
-            remaining == -1L -> context.getString(R.string.sleep_status_end_of_track)
-            remaining > 0L -> {
-                val mins = ((remaining + 59_999L) / 60_000L).toInt()
-                context.getString(R.string.sleep_status_minutes, mins)
-            }
-            else -> ""
-        }
         val options = ArrayList<String>().apply {
             for (m in MINUTES) add(context.getString(R.string.sleep_option_minutes, m))
             add(context.getString(R.string.sleep_option_end_of_track))
             if (remaining != 0L) add(context.getString(R.string.sleep_option_off))
         }
-        val title = if (activeLabel.isEmpty()) {
-            context.getString(R.string.menu_sleep_timer)
-        } else {
-            "${context.getString(R.string.menu_sleep_timer)} ($activeLabel)"
-        }
         AlertDialog.Builder(context)
-            .setTitle(title)
+            .setTitle(titleOf(context, remaining))
             .setItems(options.toTypedArray()) { _, which ->
-                when {
-                    which in MINUTES.indices -> {
-                        val mins = MINUTES[which]
-                        connection.setSleepTimer(mins, endOfTrack = false)
-                        Toast.makeText(
-                            context,
-                            context.getString(R.string.sleep_toast_set, mins),
-                            Toast.LENGTH_SHORT
-                        ).show()
-                    }
-                    which == MINUTES.size -> {
-                        connection.setSleepTimer(0, endOfTrack = true)
-                        Toast.makeText(
-                            context,
-                            context.getString(R.string.sleep_toast_end_of_track),
-                            Toast.LENGTH_SHORT
-                        ).show()
-                    }
-                    else -> {
-                        connection.setSleepTimer(0, endOfTrack = false)
-                        Toast.makeText(
-                            context,
-                            context.getString(R.string.sleep_toast_off),
-                            Toast.LENGTH_SHORT
-                        ).show()
-                    }
-                }
+                choose(context, connection, which)
+                onChanged()
             }
             .setNegativeButton(android.R.string.cancel, null)
             .show()
+    }
+
+    private fun titleOf(context: Context, remaining: Long): String {
+        val base = context.getString(R.string.menu_sleep_timer)
+        val active = when {
+            remaining == -1L -> context.getString(R.string.sleep_status_end_of_track)
+            remaining > 0L -> context.getString(R.string.sleep_status_minutes, ((remaining + 59_999L) / 60_000L).toInt())
+            else -> return base
+        }
+        return "$base ($active)"
+    }
+
+    private fun choose(context: Context, connection: PlayerConnection, which: Int) {
+        val message = when {
+            which in MINUTES.indices -> {
+                connection.setSleepTimer(MINUTES[which], endOfTrack = false)
+                context.getString(R.string.sleep_toast_set, MINUTES[which])
+            }
+            which == MINUTES.size -> {
+                connection.setSleepTimer(0, endOfTrack = true)
+                context.getString(R.string.sleep_toast_end_of_track)
+            }
+            else -> {
+                connection.setSleepTimer(0, endOfTrack = false)
+                context.getString(R.string.sleep_toast_off)
+            }
+        }
+        Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
     }
 }

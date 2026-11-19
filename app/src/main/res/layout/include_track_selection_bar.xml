@@ -1,0 +1,114 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Takes a song list's header place while songs are being picked. -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/trackSelectionBar"
+    android:layout_width="match_parent"
+    android:layout_height="80dp"
+    android:gravity="center_vertical"
+    android:orientation="horizontal"
+    android:paddingStart="8dp"
+    android:paddingEnd="12dp"
+    android:visibility="gone">
+
+    <FrameLayout
+        android:id="@+id/trackSelectionClose"
+        android:layout_width="44dp"
+        android:layout_height="44dp"
+        android:background="@drawable/player_cell_bg"
+        android:clickable="true"
+        android:contentDescription="@string/queue_selection_close"
+        android:focusable="true">
+
+        <ImageView
+            android:layout_width="22dp"
+            android:layout_height="22dp"
+            android:layout_gravity="center"
+            android:contentDescription="@null"
+            android:src="@drawable/player_ic_close"
+            android:tint="#F5F5F7" />
+    </FrameLayout>
+
+    <TextView
+        android:id="@+id/trackSelectionCount"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="4dp"
+        android:layout_weight="1"
+        android:ellipsize="end"
+        android:singleLine="true"
+        android:textColor="@color/text_primary"
+        android:textSize="16sp"
+        android:textStyle="bold" />
+
+    <FrameLayout
+        android:id="@+id/trackSelectionPlayNext"
+        android:layout_width="44dp"
+        android:layout_height="44dp"
+        android:background="@drawable/player_cell_bg"
+        android:clickable="true"
+        android:contentDescription="@string/menu_play_next"
+        android:focusable="true">
+
+        <ImageView
+            android:layout_width="22dp"
+            android:layout_height="22dp"
+            android:layout_gravity="center"
+            android:contentDescription="@null"
+            android:src="@drawable/player_ic_play_next"
+            android:tint="#ECEFF1" />
+    </FrameLayout>
+
+    <FrameLayout
+        android:id="@+id/trackSelectionPlaylist"
+        android:layout_width="44dp"
+        android:layout_height="44dp"
+        android:background="@drawable/player_cell_bg"
+        android:clickable="true"
+        android:contentDescription="@string/menu_add_playlist"
+        android:focusable="true">
+
+        <ImageView
+            android:layout_width="22dp"
+            android:layout_height="22dp"
+            android:layout_gravity="center"
+            android:contentDescription="@null"
+            android:src="@drawable/player_ic_add"
+            android:tint="#ECEFF1" />
+    </FrameLayout>
+
+    <FrameLayout
+        android:id="@+id/trackSelectionFavorite"
+        android:layout_width="44dp"
+        android:layout_height="44dp"
+        android:background="@drawable/player_cell_bg"
+        android:clickable="true"
+        android:contentDescription="@string/menu_add_favorite"
+        android:focusable="true">
+
+        <ImageView
+            android:id="@+id/trackSelectionFavoriteIcon"
+            android:layout_width="22dp"
+            android:layout_height="22dp"
+            android:layout_gravity="center"
+            android:contentDescription="@null"
+            android:src="@drawable/player_ic_heart_outline" />
+    </FrameLayout>
+
+    <FrameLayout
+        android:id="@+id/trackSelectionMore"
+        android:layout_width="44dp"
+        android:layout_height="44dp"
+        android:background="@drawable/player_cell_bg"
+        android:clickable="true"
+        android:contentDescription="@string/selection_more"
+        android:focusable="true">
+
+        <ImageView
+            android:layout_width="22dp"
+            android:layout_height="22dp"
+            android:layout_gravity="center"
+            android:contentDescription="@null"
+            android:src="@drawable/player_ic_more"
+            android:tint="#ECEFF1" />
+    </FrameLayout>
+</LinearLayout>

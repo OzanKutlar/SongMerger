@@ -380,9 +380,18 @@ object AiMashupDialog {
         val neutral = dialog.getButton(AlertDialog.BUTTON_NEUTRAL) ?: return
         val negative = dialog.getButton(AlertDialog.BUTTON_NEGATIVE) ?: return
         val running = state.isRunning
-        neutral.visibility = if (running) View.VISIBLE else View.GONE
+        val completed = state.phase == Phase.COMPLETED
+        // Running: run in background or stop. Finished: keep the results for later or discard them.
+        neutral.visibility = if (running || completed) View.VISIBLE else View.GONE
+        neutral.setText(if (running) R.string.mashup_hide else R.string.mashup_keep)
         neutral.setOnClickListener { dialog.dismiss() }
-        negative.setText(if (running) android.R.string.cancel else R.string.mashup_close)
+        negative.setText(
+            when {
+                running -> R.string.mashup_stop
+                completed -> R.string.mashup_discard
+                else -> R.string.mashup_close
+            }
+        )
         negative.setOnClickListener { generator.cancel() }
         when {
             state.phase == Phase.COMPLETED -> {

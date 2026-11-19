@@ -12,9 +12,12 @@ import android.view.animation.DecelerateInterpolator
 import android.widget.ImageView
 import android.widget.TextView
 import me.Integer.Mediaplayer.R
+import me.Integer.Mediaplayer.playback.NowPlaying
 import me.Integer.Mediaplayer.playback.SkipOutcome
 import me.Integer.Mediaplayer.ui.widgets.MarqueeTextView
+import me.Integer.Mediaplayer.ui.widgets.MiniBarGestures
 import me.Integer.Mediaplayer.ui.widgets.PressFeedback
+import me.Integer.Mediaplayer.ui.widgets.ProgressLineDrawable
 import me.Integer.Mediaplayer.ui.widgets.VinylDiscView
 import me.Integer.Mediaplayer.ui.widgets.ViewGeometry
 
@@ -71,6 +74,9 @@ class MiniPlayerBar(
         setColor(CoverTint.FALLBACK)
     }
 
+    private val progressLine = ProgressLineDrawable(density, CORNER_DP * density * PROGRESS_INSET_SHARE)
+    private val progressTask = Runnable { onProgressTick() }
+
     private var shownColor = CoverTint.FALLBACK
     private var tintedArt: Bitmap? = null
     private var tintApplied = false
@@ -92,6 +98,7 @@ class MiniPlayerBar(
 
     init {
         bar.background = shape
+        bar.foreground = progressLine
         bar.setOnClickListener { navigator.openNowPlaying() }
         val previousCell = bar.findViewById<View>(R.id.miniPrevious)
         val nextCell = bar.findViewById<View>(R.id.miniNext)
@@ -101,6 +108,15 @@ class MiniPlayerBar(
         previousCell.setOnClickListener { skipBack() }
         playCell.setOnClickListener { togglePlayback() }
         nextCell.setOnClickListener { host.connection.next() }
+        MiniBarGestures.attach(bar, object : MiniBarGestures.Callback {
+            override fun onSwipeUp() = navigator.openNowPlaying()
+
+            override fun onSwipeLeft() {
+                if (host.nowPlaying.canNext) host.connection.next()
+            }
+
+            override fun onSwipeRight() = swipeBack()
+        })
     }
 
     /** Hidden while true, e.g. on the full player. */
@@ -115,6 +131,7 @@ class MiniPlayerBar(
         setShown(state.active && !suppressed)
         if (!state.active) {
             vinyl.setPlaying(false)
+            stopProgress()
             return
         }
         title.setText(state.title.ifEmpty { unknownTitle })
@@ -127,11 +144,14 @@ class MiniPlayerBar(
         vinyl.setPlaying(state.clockRunning && shown)
         vinyl.setExpanded(state.playing)
         renderPlayIcon(state.playing)
+        renderProgress(state)
+        scheduleProgress(shown && state.clockRunning)
     }
 
     /** Stops everything that animates; [render] picks it up again. */
     fun stop() {
         vinyl.setPlaying(false)
+        bar.removeCallbacks(progressTask)
         settlePlayIcon()
         colorAnimator?.end()
         colorAnimator = null
@@ -181,6 +201,7 @@ class MiniPlayerBar(
         held = true
         bar.animate().cancel()
         bar.alpha = 0f
+        bar.translationX = 0f
         bar.translationY = 0f
         bar.scaleX = 1f
         bar.scaleY = 1f
@@ -213,7 +234,40 @@ class MiniPlayerBar(
         if (shown && !held) bar.alpha = 1f
     }
 
+    // ------------------------------------------------------------------ progress
+
+    private fun renderProgress(state: NowPlaying) {
+        val duration = state.durationMs
+        val position = state.positionAt(SystemClock.elapsedRealtime())
+        progressLine.setFraction(if (duration > 0L) position.toFloat() / duration else 0f)
+    }
+
+    /** While a song advances on screen the line moves twice a second; otherwise nothing runs. */
+    private fun scheduleProgress(running: Boolean) {
+        bar.removeCallbacks(progressTask)
+        if (running) bar.postDelayed(progressTask, PROGRESS_TICK_MS)
+    }
+
+    private fun stopProgress() {
+        bar.removeCallbacks(progressTask)
+        progressLine.setFraction(0f)
+    }
+
+    private fun onProgressTick() {
+        val state = host.nowPlaying
+        if (!state.active) return
+        renderProgress(state)
+        scheduleProgress(shown && state.clockRunning)
+    }
+
     // ------------------------------------------------------------------ actions
+
+    /** A swipe always goes back one track when there is one, like swiping the big record. */
+    private fun swipeBack() {
+        val state = host.nowPlaying
+        if (!state.active) return
+        if (state.hasPreviousTrack) host.connection.previousTrack() else host.connection.restart()
+    }
 
     /** Like most players: restart when a few seconds in, otherwise the previous song. */
     private fun skipBack() {
@@ -302,6 +356,7 @@ class MiniPlayerBar(
         if (show == shown) return
         shown = show
         bar.animate().cancel()
+        bar.translationX = 0f
         bar.scaleX = 1f
         bar.scaleY = 1f
         if (held) {
@@ -333,6 +388,10 @@ class MiniPlayerBar(
         const val TINT_MS = 450L
         const val MORPH_SCALE = 0.4f
         const val MORPH_HALF_MS = 90L
+        const val PROGRESS_TICK_MS = 500L
+
+        /** The progress line keeps this share of the corner radius away from each end. */
+        const val PROGRESS_INSET_SHARE = 0.75f
 
         /** VinylDiscView's disc diameter as a share of its view, and its size while paused. */
         const val DISC_SHARE = 0.87f

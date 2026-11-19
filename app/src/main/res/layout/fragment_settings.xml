@@ -132,6 +132,14 @@
                         android:textSize="18sp" />
 
                     <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="2dp"
+                        android:text="@string/settings_play_speed_help"
+                        android:textColor="@color/text_secondary"
+                        android:textSize="14sp" />
+
+                    <TextView
                         android:id="@+id/settingsPlaySpeedValue"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
@@ -179,6 +187,14 @@
                         android:text="@string/settings_crossfade_row_title"
                         android:textColor="@color/text_primary"
                         android:textSize="18sp" />
+
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="2dp"
+                        android:text="@string/settings_crossfade_help"
+                        android:textColor="@color/text_secondary"
+                        android:textSize="14sp" />
 
                     <TextView
                         android:id="@+id/settingsCrossfadeValue"

@@ -1,6 +1,8 @@
 package me.Integer.Mediaplayer.ui
 
 import android.annotation.SuppressLint
+import android.graphics.drawable.ColorDrawable
+import android.graphics.drawable.Drawable
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
@@ -16,14 +18,17 @@ import me.Integer.Mediaplayer.ui.widgets.SkeletonDrawable
 
 /**
  * Song rows: cover, title, artists, a quick "Play next" button, and a three-dot menu.
- * The playing song is highlighted.
+ * The playing song is highlighted. With a [selection], rows show a check mark while songs
+ * are being picked, and [onLongPress] (when given) starts picking.
  */
 class TrackAdapter(
     private val thumbnails: ThumbnailLoader,
     private val artistLine: (Track) -> String,
     private val onClick: (Int) -> Unit,
     private val onPlayNext: (Track) -> Unit,
-    private val onMenu: (Track, View) -> Unit
+    private val onMenu: (Track, View) -> Unit,
+    private val selection: TrackSelection? = null,
+    private val onLongPress: ((Int) -> Unit)? = null
 ) : RecyclerView.Adapter<TrackAdapter.Holder>() {
 
     class Holder(view: View) : RecyclerView.ViewHolder(view) {
@@ -34,6 +39,9 @@ class TrackAdapter(
         val playNext: View = view.findViewById(R.id.trackPlayNext)
         val menu: View = view.findViewById(R.id.trackMenu)
         val divider: View = view.findViewById(R.id.trackDivider)
+        val check: ImageView = view.findViewById(R.id.trackCheck)
+        val normalBackground: Drawable? = view.background
+        val pickedBackground: Drawable = ColorDrawable(PICKED_COLOR)
         var isSkeleton = false
     }
 
@@ -71,6 +79,15 @@ class TrackAdapter(
         notifyRow(trackUri)
     }
 
+    /** Restyles every row after selection starts, stops, or changes as a whole. */
+    fun refreshSelection() {
+        if (tracks.isNotEmpty()) notifyItemRangeChanged(0, tracks.size, PAYLOAD_SELECTION)
+    }
+
+    fun refreshRow(position: Int) {
+        if (position in tracks.indices) notifyItemChanged(position, PAYLOAD_SELECTION)
+    }
+
     private fun notifyRow(trackUri: String) {
         if (trackUri.isEmpty()) return
         val index = tracks.indexOfFirst { it.uri == trackUri }
@@ -103,6 +120,15 @@ class TrackAdapter(
         view.setOnClickListener {
             val position = holder.bindingAdapterPosition
             if (position != RecyclerView.NO_POSITION) onClick(position)
+        }
+        val longPress = onLongPress
+        if (longPress != null) {
+            view.setOnLongClickListener {
+                val position = holder.bindingAdapterPosition
+                val usable = position in tracks.indices
+                if (usable) longPress(position)
+                usable
+            }
         }
         holder.playNext.setOnClickListener {
             val position = holder.bindingAdapterPosition
@@ -137,6 +163,33 @@ class TrackAdapter(
         holder.title.setTextColor(ContextCompat.getColor(context, color))
         holder.divider.visibility = if (position == tracks.size - 1) View.INVISIBLE else View.VISIBLE
         thumbnails.bind(holder.art, track.uri)
+        bindSelection(holder, track)
+    }
+
+    /** A selection-only update keeps the row's text and cover as they are. */
+    override fun onBindViewHolder(holder: Holder, position: Int, payloads: MutableList<Any>) {
+        val track = tracks.getOrNull(position)
+        if (payloads.isEmpty() || holder.isSkeleton || track == null) {
+            super.onBindViewHolder(holder, position, payloads)
+            return
+        }
+        bindSelection(holder, track)
+    }
+
+    /** While picking, the row buttons give way to a check mark and picked rows are tinted. */
+    private fun bindSelection(holder: Holder, track: Track) {
+        val selecting = selection?.isActive == true
+        val picked = selecting && selection?.contains(track.uri) == true
+        val buttons = if (selecting) View.GONE else View.VISIBLE
+        holder.playNext.visibility = buttons
+        holder.menu.visibility = buttons
+        holder.check.visibility = if (selecting) View.VISIBLE else View.GONE
+        val context = holder.itemView.context
+        val checkColor = if (picked) R.color.accent else R.color.text_muted
+        holder.check.setColorFilter(ContextCompat.getColor(context, checkColor))
+        holder.check.alpha = if (picked) 1f else UNPICKED_ALPHA
+        val background = if (picked) holder.pickedBackground else holder.normalBackground
+        if (holder.itemView.background !== background) holder.itemView.background = background
     }
 
     private fun bindSkeleton(holder: Holder, position: Int) {
@@ -153,6 +206,8 @@ class TrackAdapter(
         setWidth(holder.artist, ((ARTIST_MIN_DP + (position * 29) % ARTIST_SPREAD_DP) * density).toInt())
         holder.playNext.visibility = View.INVISIBLE
         holder.menu.visibility = View.INVISIBLE
+        holder.check.visibility = View.GONE
+        if (holder.itemView.background !== holder.normalBackground) holder.itemView.background = holder.normalBackground
         holder.divider.visibility = if (position == SKELETON_COUNT - 1) View.INVISIBLE else View.VISIBLE
     }
 
@@ -170,6 +225,9 @@ class TrackAdapter(
         private const val TITLE_SPREAD_DP = 90
         private const val ARTIST_MIN_DP = 85
         private const val ARTIST_SPREAD_DP = 70
+        private const val UNPICKED_ALPHA = 0.35f
+        private const val PICKED_COLOR = 0x22FF6D00
+        private val PAYLOAD_SELECTION = Any()
 
         fun diff(previous: List<Track>, next: List<Track>): DiffUtil.DiffResult {
             return DiffUtil.calculateDiff(object : DiffUtil.Callback() {

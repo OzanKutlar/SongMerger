@@ -63,6 +63,8 @@ class PlayerConnection(
         override fun onEvents(player: Player, events: Player.Events) {
             // A DJ crossfade changes the volume many times a second; nothing on screen shows it.
             if (events.size() == 1 && events.contains(Player.EVENT_VOLUME_CHANGED)) return
+            // An end-of-track sleep timer is used up once the song changes.
+            if (sleepEndOfTrack && events.contains(Player.EVENT_MEDIA_ITEM_TRANSITION)) sleepEndOfTrack = false
             publish()
         }
     }

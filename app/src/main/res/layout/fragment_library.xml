@@ -62,6 +62,26 @@
         </FrameLayout>
     </LinearLayout>
 
+    <!-- A background AI mashup job: progress or ready results; tap to open them -->
+    <TextView
+        android:id="@+id/libraryMashupChip"
+        android:layout_width="wrap_content"
+        android:layout_height="36dp"
+        android:layout_marginStart="20dp"
+        android:layout_marginEnd="20dp"
+        android:layout_marginBottom="6dp"
+        android:background="@drawable/status_chip_bg"
+        android:clickable="true"
+        android:ellipsize="end"
+        android:focusable="true"
+        android:gravity="center_vertical"
+        android:paddingStart="14dp"
+        android:paddingEnd="14dp"
+        android:singleLine="true"
+        android:textColor="@color/accent"
+        android:textSize="14sp"
+        android:visibility="gone" />
+
     <!-- Search bar, opened from the header -->
     <LinearLayout
         android:id="@+id/librarySearchBar"
@@ -209,6 +229,7 @@
         android:orientation="vertical">
 
         <LinearLayout
+            android:id="@+id/libraryCardHeader"
             android:layout_width="match_parent"
             android:layout_height="80dp"
             android:gravity="center_vertical"
@@ -304,6 +325,8 @@
             </FrameLayout>
         </LinearLayout>
 
+        <include layout="@layout/include_track_selection_bar" />
+
         <TextView
             android:id="@+id/libraryScan"
             android:layout_width="match_parent"
@@ -328,16 +351,42 @@
                 android:clipToPadding="false"
                 android:paddingBottom="96dp" />
 
-            <TextView
-                android:id="@+id/libraryEmpty"
+            <!-- Empty state; the button only shows while the library has no songs at all -->
+            <LinearLayout
+                android:id="@+id/libraryEmptyBlock"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_gravity="center"
-                android:gravity="center"
+                android:gravity="center_horizontal"
+                android:orientation="vertical"
                 android:padding="32dp"
-                android:textColor="@color/text_muted"
-                android:textSize="16sp"
-                android:visibility="gone" />
+                android:visibility="gone">
+
+                <TextView
+                    android:id="@+id/libraryEmpty"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:gravity="center"
+                    android:textColor="@color/text_muted"
+                    android:textSize="16sp" />
+
+                <TextView
+                    android:id="@+id/libraryAddFolder"
+                    android:layout_width="wrap_content"
+                    android:layout_height="48dp"
+                    android:layout_marginTop="20dp"
+                    android:background="@drawable/library_cta_bg"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:gravity="center"
+                    android:paddingStart="28dp"
+                    android:paddingEnd="28dp"
+                    android:text="@string/library_add_folder"
+                    android:textColor="#FFFFFFFF"
+                    android:textSize="16sp"
+                    android:textStyle="bold"
+                    android:visibility="gone" />
+            </LinearLayout>
         </FrameLayout>
     </LinearLayout>
 

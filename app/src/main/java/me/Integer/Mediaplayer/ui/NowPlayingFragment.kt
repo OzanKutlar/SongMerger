@@ -4,7 +4,6 @@ import android.os.Bundle
 import android.view.View
 import android.widget.Toast
 import androidx.activity.OnBackPressedCallback
-import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.widget.PopupMenu
 import androidx.core.os.bundleOf
 import androidx.fragment.app.Fragment
@@ -72,6 +71,9 @@ class NowPlayingFragment : Fragment(R.layout.fragment_now_playing), PlayerHost.L
             queueController?.toggleQueue()
         }
         view.findViewById<View>(R.id.playerMore).setOnClickListener { showMoreMenu(it) }
+        view.findViewById<View>(R.id.playerArtist).setOnClickListener {
+            if (host.nowPlaying.active) openArtistForCurrent()
+        }
         view.findViewById<View>(R.id.playerAdd).setOnClickListener {
             currentTrack()?.let { PlaylistDialogs.addTrack(requireContext(), repository, it) }
         }
@@ -181,18 +183,7 @@ class NowPlayingFragment : Fragment(R.layout.fragment_now_playing), PlayerHost.L
         } else {
             ArtistSplitter.split(host.nowPlaying.artist, repository.settings.artistSeparator)
         }
-        if (artists.size <= 1) {
-            navigator.openArtist(artists.firstOrNull().orEmpty())
-            return
-        }
-        val labels = artists.toTypedArray()
-        AlertDialog.Builder(requireContext())
-            .setTitle(R.string.choose_artist_title)
-            .setItems(labels) { _, which ->
-                if (which in artists.indices) navigator.openArtist(artists[which])
-            }
-            .setNegativeButton(android.R.string.cancel, null)
-            .show()
+        TrackMenu.openArtist(requireContext(), artists, navigator)
     }
 
     private fun currentTrack(): Track? {

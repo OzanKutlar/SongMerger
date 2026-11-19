@@ -44,10 +44,31 @@
                     android:tint="#FFFFFF" />
             </FrameLayout>
 
-            <View
+            <!-- Sleep timer countdown, only while a timer runs -->
+            <FrameLayout
                 android:layout_width="0dp"
-                android:layout_height="1dp"
-                android:layout_weight="1" />
+                android:layout_height="match_parent"
+                android:layout_weight="1">
+
+                <TextView
+                    android:id="@+id/playerSleepChip"
+                    android:layout_width="wrap_content"
+                    android:layout_height="32dp"
+                    android:layout_gravity="center"
+                    android:background="@drawable/player_chip_bg"
+                    android:clickable="true"
+                    android:drawableStart="@drawable/player_ic_sleep"
+                    android:drawablePadding="6dp"
+                    android:drawableTint="#FFFFFF"
+                    android:focusable="true"
+                    android:fontFeatureSettings="tnum"
+                    android:gravity="center_vertical"
+                    android:paddingStart="12dp"
+                    android:paddingEnd="14dp"
+                    android:textColor="#FFFFFF"
+                    android:textSize="14sp"
+                    android:visibility="gone" />
+            </FrameLayout>
 
             <FrameLayout
                 android:id="@+id/playerMore"

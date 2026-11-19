@@ -57,6 +57,7 @@
         android:orientation="vertical">
 
         <LinearLayout
+            android:id="@+id/artistCardHeader"
             android:layout_width="match_parent"
             android:layout_height="80dp"
             android:gravity="center_vertical"
@@ -109,6 +110,8 @@
                     android:tint="#F5F5F7" />
             </FrameLayout>
         </LinearLayout>
+
+        <include layout="@layout/include_track_selection_bar" />
 
         <androidx.recyclerview.widget.RecyclerView
             android:id="@+id/artistList"

@@ -108,6 +108,17 @@
                     android:src="@drawable/player_ic_more"
                     android:tint="#A1A1A6" />
             </FrameLayout>
+
+            <!-- Shown instead of the row buttons while songs are being picked -->
+            <ImageView
+                android:id="@+id/trackCheck"
+                android:layout_width="24dp"
+                android:layout_height="24dp"
+                android:layout_marginStart="10dp"
+                android:layout_marginEnd="20dp"
+                android:contentDescription="@null"
+                android:src="@drawable/player_ic_check"
+                android:visibility="gone" />
         </LinearLayout>
 
         <View

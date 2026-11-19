@@ -25,7 +25,8 @@
     <string name="sort_artist_count">Song count</string>
     <string name="library_scanning">Scanning %1$d / %2$d</string>
     <string name="library_scanning_folders">Looking for songs</string>
-    <string name="library_empty">No songs yet. Open &#8942; &#8594; Settings and add the folder that holds your music.</string>
+    <string name="library_empty">No songs yet. Add the folder that holds your music to get started.</string>
+    <string name="library_add_folder">Add music folder</string>
     <string name="library_favorites_empty">No favorite songs yet. Tap the heart on any song to add it here.</string>
     <string name="library_no_match">Nothing matches your search</string>
     <string name="library_folder_failed">Could not keep access to that folder</string>
@@ -54,6 +55,8 @@
     <string name="menu_remove_favorite">Remove from favorites</string>
     <string name="menu_view_album">View album</string>
     <string name="menu_view_artist">View artist</string>
+    <string name="menu_go_artist">Go to artist</string>
+    <string name="menu_go_album">Go to album</string>
     <string name="menu_current_queue">Current queue</string>
     <string name="menu_view_lyrics">Lyrics</string>
     <string name="menu_sleep_timer">Sleep timer</string>
@@ -68,6 +71,7 @@
     <string name="sleep_toast_set">Sleep timer set for %1$d minutes</string>
     <string name="sleep_toast_end_of_track">Playback will stop at the end of this track</string>
     <string name="sleep_toast_off">Sleep timer turned off</string>
+    <string name="sleep_chip_description">Sleep timer, %1$s. Tap to change</string>
     <string name="choose_artist_title">Select artist</string>
     <string name="toast_play_next">Playing next: %1$s</string>
     <string name="toast_added_to_queue">Added to queue: %1$s</string>
@@ -176,7 +180,11 @@
     <string name="mashup_failed_too_few">At least two songs longer than 20 seconds are needed.</string>
     <string name="mashup_failed_server">The server did not answer as expected: %1$s</string>
     <string name="mashup_failed_no_routes">The server found no smooth transitions between these songs.</string>
-    <string name="mashup_hide">Hide</string>
+    <string name="mashup_hide">Run in background</string>
+    <string name="mashup_keep">Keep for later</string>
+    <string name="mashup_stop">Stop</string>
+    <string name="mashup_discard">Discard</string>
+    <string name="mashup_chip">AI mashups &#183; %1$s</string>
     <string name="mashup_close">Close</string>
     <string name="mashup_save_all">Save all</string>
     <string name="mashup_set_server">Set address</string>
@@ -219,6 +227,17 @@
     <string name="queue_select_all">Select all</string>
     <string name="queue_selection_close">Stop selecting</string>
     <string name="queue_nothing_to_save">None of these songs are in your library</string>
+
+    <!-- Song selection -->
+    <string name="selection_more">More actions</string>
+    <plurals name="selection_play_next">
+        <item quantity="one">%1$d song will play next</item>
+        <item quantity="other">%1$d songs will play next</item>
+    </plurals>
+    <plurals name="selection_added_queue">
+        <item quantity="one">Added %1$d song to the queue</item>
+        <item quantity="other">Added %1$d songs to the queue</item>
+    </plurals>
     <plurals name="queue_selected">
         <item quantity="one">%1$d selected</item>
         <item quantity="other">%1$d selected</item>
@@ -261,6 +280,8 @@
     <string name="settings_section_playlists">Playlists &amp; Library</string>
     <string name="settings_section_ai">AI Mashup Server</string>
     <string name="settings_play_speed_title">Play speed</string>
+    <string name="settings_play_speed_help">Tap the value to go back to normal speed</string>
+    <string name="settings_play_speed_value">%1$s×</string>
     <string name="settings_crossfade_row_title">Crossfade between tracks</string>
     <plurals name="settings_crossfade_seconds_plural">
         <item quantity="one">%1$d second</item>
@@ -270,7 +291,7 @@
     <string name="settings_folders_row_title">Music folders</string>
     <string name="settings_separator_row_title">Artist separator</string>
     <string name="settings_no_duplicates_title">Don’t allow duplicate songs</string>
-    <string name="settings_no_duplicates_sub">Don’t allow duplicates in queue</string>
+    <string name="settings_no_duplicates_sub">“Play next” and “Add to queue” skip songs that are already queued</string>
     <string name="settings_ai_not_configured">Not configured</string>
     <string name="settings_ai_token_active">Token set</string>
     <string name="settings_ai_discover_row">Find server on Wi-Fi</string>

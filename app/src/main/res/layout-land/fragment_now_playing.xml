@@ -304,6 +304,27 @@
                 android:layout_height="56dp"
                 android:paddingEnd="6dp">
 
+                <!-- Sleep timer countdown, only while a timer runs -->
+                <TextView
+                    android:id="@+id/playerSleepChip"
+                    android:layout_width="wrap_content"
+                    android:layout_height="32dp"
+                    android:layout_gravity="start|center_vertical"
+                    android:layout_marginStart="18dp"
+                    android:background="@drawable/player_chip_bg"
+                    android:clickable="true"
+                    android:drawableStart="@drawable/player_ic_sleep"
+                    android:drawablePadding="6dp"
+                    android:drawableTint="#FFFFFF"
+                    android:focusable="true"
+                    android:fontFeatureSettings="tnum"
+                    android:gravity="center_vertical"
+                    android:paddingStart="12dp"
+                    android:paddingEnd="14dp"
+                    android:textColor="#FFFFFF"
+                    android:textSize="14sp"
+                    android:visibility="gone" />
+
                 <FrameLayout
                     android:id="@+id/playerMore"
                     android:layout_width="48dp"

@@ -50,6 +50,7 @@ class NowPlayingController(
     private val idleTitle = context.getString(R.string.player_idle)
     private val playDescription = context.getString(R.string.player_play)
     private val pauseDescription = context.getString(R.string.player_pause)
+    private val sleepEndLabel = context.getString(R.string.sleep_status_end_of_track)
     private val thumbNormal: Drawable? = ContextCompat.getDrawable(context, R.drawable.player_seek_thumb)
     private val thumbPressed: Drawable? = ContextCompat.getDrawable(context, R.drawable.player_seek_thumb_pressed)
 
@@ -80,6 +81,7 @@ class NowPlayingController(
     private val nextIcon: View = root.findViewById(R.id.playerNextIcon)
     private val repeatCell: View = root.findViewById(R.id.playerRepeat)
     private val repeatIcon: ImageView = root.findViewById(R.id.playerRepeatIcon)
+    private val sleepChip: TextView = root.findViewById(R.id.playerSleepChip)
     private val transition = TrackTransition(textBlock, density)
 
     private var dragging = false
@@ -203,6 +205,7 @@ class NowPlayingController(
         val now = SystemClock.elapsedRealtime()
         val current = state
         returnDiscIfIgnored(now)
+        renderSleepChip()
         if (!current.active) return
         if (scrubbing) sendScrubSeek(scrubTargetMs)
         renderProgress(current, now)
@@ -236,6 +239,7 @@ class NowPlayingController(
         nextCell.setOnClickListener { onSkip(TrackTransition.DIRECTION_NEXT, false) }
         shuffleCell.setOnClickListener { host.connection.toggleShuffle() }
         repeatCell.setOnClickListener { host.connection.cycleRepeat() }
+        sleepChip.setOnClickListener { SleepTimerDialog.show(context, host.connection) { renderSleepChip() } }
         seekBar.max = PlaybackClock.PERMILLE_MAX
         seekBar.setOnSeekBarChangeListener(seekListener)
     }
@@ -495,6 +499,7 @@ class NowPlayingController(
     private fun render() {
         val now = SystemClock.elapsedRealtime()
         val current = state
+        renderSleepChip()
         if (!current.active) {
             renderIdle()
             return
@@ -685,6 +690,21 @@ class NowPlayingController(
         repeatIcon.setImageResource(if (one) R.drawable.player_ic_repeat_one else R.drawable.player_ic_repeat)
         repeatIcon.setColorFilter(if (mode == NowPlaying.REPEAT_OFF) COLOR_IDLE else COLOR_ON)
         if (animate) hop(repeatIcon)
+    }
+
+    /** A countdown chip in the top bar while a sleep timer runs; hidden otherwise. */
+    private fun renderSleepChip() {
+        val remaining = host.connection.sleepTimerRemainingMs()
+        val label = when {
+            remaining == -1L -> sleepEndLabel
+            remaining > 0L -> PlaybackClock.format(remaining)
+            else -> null
+        }
+        val visibility = if (label == null) View.GONE else View.VISIBLE
+        if (sleepChip.visibility != visibility) sleepChip.visibility = visibility
+        if (label == null || sleepChip.text.toString() == label) return
+        sleepChip.text = label
+        sleepChip.contentDescription = context.getString(R.string.sleep_chip_description, label)
     }
 
     private fun renderProgress(current: NowPlaying, now: Long) {

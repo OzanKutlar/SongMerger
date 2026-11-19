@@ -11,6 +11,7 @@ import android.view.animation.DecelerateInterpolator
 import android.view.inputmethod.InputMethodManager
 import android.widget.EditText
 import android.widget.TextView
+import android.content.ActivityNotFoundException
 import android.net.Uri
 import android.view.ViewGroup
 import android.widget.Toast
@@ -71,6 +72,14 @@ class LibraryFragment : Fragment(R.layout.fragment_library), LibraryRepository.L
     private lateinit var sortLabel: TextView
     private lateinit var shuffleButton: View
     private lateinit var playAllButton: View
+    private lateinit var emptyBlock: View
+    private lateinit var addFolderButton: View
+    private lateinit var mashupChip: TextView
+    private lateinit var selectionController: TrackSelectionController
+    private val trackSelection = TrackSelection()
+    private val mashupListener = AiMashupGenerator.Listener { state -> renderMashupChip(state) }
+    private val pickFolder =
+        registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri -> onFolderPicked(uri) }
     private val tabAnimators = HashMap<TextView, ValueAnimator>()
 
     private val worker = Executors.newSingleThreadExecutor { task ->
@@ -99,6 +108,9 @@ class LibraryFragment : Fragment(R.layout.fragment_library), LibraryRepository.L
         initialBatchReady = repository.isLoaded && repository.tracks.isNotEmpty()
         bindViews(view)
         createAdapters()
+        selectionController = TrackSelectionController(
+            this, view, view.findViewById(R.id.libraryCardHeader), trackAdapter, trackSelection, host, repository
+        )
         wireHeader(view)
         wireCard()
         renderTabs()
@@ -122,11 +134,14 @@ class LibraryFragment : Fragment(R.layout.fragment_library), LibraryRepository.L
         onPlayerChanged()
         PlaylistImporter.get(requireContext()).onAppResumed()
         ImportPlaylistDialog.showStatusDialogIfActive(requireContext())
-        AiMashupGenerator.get(requireContext()).resumeIfPending()
-        AiMashupDialog.showStatusDialogIfActive(requireContext(), host)
+        val generator = AiMashupGenerator.get(requireContext())
+        generator.addListener(mashupListener)
+        generator.resumeIfPending()
+        renderMashupChip(generator.state)
     }
 
     override fun onStop() {
+        AiMashupGenerator.get(requireContext()).removeListener(mashupListener)
         host.removePlayerListener(this)
         repository.removeListener(this)
         for (animator in tabAnimators.values) animator.end()
@@ -179,6 +194,9 @@ class LibraryFragment : Fragment(R.layout.fragment_library), LibraryRepository.L
         sortLabel = view.findViewById(R.id.librarySortLabel)
         shuffleButton = view.findViewById(R.id.libraryShuffle)
         playAllButton = view.findViewById(R.id.libraryPlayAll)
+        emptyBlock = view.findViewById(R.id.libraryEmptyBlock)
+        addFolderButton = view.findViewById(R.id.libraryAddFolder)
+        mashupChip = view.findViewById(R.id.libraryMashupChip)
         list.layoutManager = LinearLayoutManager(requireContext())
         FastScroller.attach(list) { index -> sectionLabelAt(index) }
     }
@@ -204,9 +222,13 @@ class LibraryFragment : Fragment(R.layout.fragment_library), LibraryRepository.L
         trackAdapter = TrackAdapter(
             thumbnails = thumbnails,
             artistLine = { artistLineOf(it) },
-            onClick = { index -> host.launchRow(list, visibleTracks, index) },
+            onClick = { index ->
+                if (!selectionController.handleTap(index)) host.launchRow(list, visibleTracks, index)
+            },
             onPlayNext = { track -> TrackMenu.playNext(requireContext(), track, host, repository) },
-            onMenu = { track, anchor -> TrackMenu.show(anchor, track, host, repository) }
+            onMenu = { track, anchor -> TrackMenu.show(anchor, track, host, repository) },
+            selection = trackSelection,
+            onLongPress = { index -> selectionController.enter(index) }
         )
         artistAdapter = ArtistAdapter(thumbnails) { artist -> navigator.openArtist(artist.name) }
         albumAdapter = AlbumAdapter(thumbnails) { album -> navigator.openAlbum(album.name) }
@@ -242,6 +264,29 @@ class LibraryFragment : Fragment(R.layout.fragment_library), LibraryRepository.L
         PressFeedback.attach(playAllButton, null, ROUND_PRESS_SCALE)
         shuffleButton.setOnClickListener { host.launchAll(list, visibleTracks, true) }
         playAllButton.setOnClickListener { host.launchAll(list, visibleTracks, false) }
+        PressFeedback.attach(addFolderButton, null, CTA_PRESS_SCALE)
+        addFolderButton.setOnClickListener { launchFolderPicker() }
+        mashupChip.setOnClickListener { AiMashupDialog.showStatusDialogIfActive(requireContext(), host) }
+    }
+
+    // ------------------------------------------------------------------ first run
+
+    private fun launchFolderPicker() {
+        try {
+            pickFolder.launch(null)
+        } catch (e: ActivityNotFoundException) {
+            Toast.makeText(requireContext(), R.string.library_folder_failed, Toast.LENGTH_LONG).show()
+        }
+    }
+
+    /** A folder picked from the empty library is kept and scanned right away. */
+    private fun onFolderPicked(uri: Uri?) {
+        if (uri == null) return
+        if (!repository.folders.add(uri)) {
+            Toast.makeText(requireContext(), R.string.library_folder_failed, Toast.LENGTH_LONG).show()
+            return
+        }
+        repository.rescan()
     }
 
     // ------------------------------------------------------------------ header actions
@@ -385,6 +430,7 @@ class LibraryFragment : Fragment(R.layout.fragment_library), LibraryRepository.L
 
     private fun selectTab(tab: Int) {
         if (activeTab == tab) return
+        selectionController.exit()
         activeTab = tab
         refresh()
         replayRows()
@@ -459,7 +505,7 @@ class LibraryFragment : Fragment(R.layout.fragment_library), LibraryRepository.L
     }
 
     private fun showSkeleton() {
-        emptyView.visibility = View.GONE
+        emptyBlock.visibility = View.GONE
         when (activeTab) {
             TAB_ARTISTS -> {
                 artistAdapter.setLoading(true)
@@ -504,6 +550,7 @@ class LibraryFragment : Fragment(R.layout.fragment_library), LibraryRepository.L
                 visibleTracks = sorted
                 trackAdapter.submit(sorted, diff)
                 if (list.adapter !== trackAdapter) list.adapter = trackAdapter
+                selectionController.onRowsChanged()
                 onRowsReady(sorted.size)
             }
         }
@@ -679,19 +726,21 @@ class LibraryFragment : Fragment(R.layout.fragment_library), LibraryRepository.L
 
     private fun renderEmpty(shownRows: Int) {
         if (isHeaderSkeletonActive()) {
-            emptyView.visibility = View.GONE
+            emptyBlock.visibility = View.GONE
             return
         }
-        emptyView.visibility = if (shownRows == 0) View.VISIBLE else View.GONE
+        emptyBlock.visibility = if (shownRows == 0) View.VISIBLE else View.GONE
         if (shownRows > 0) return
+        val noSongs = repository.tracks.isEmpty()
         val message = when {
-            repository.tracks.isEmpty() -> R.string.library_empty
+            noSongs -> R.string.library_empty
             query.isNotBlank() -> R.string.library_no_match
             activeTab == TAB_FAVORITES -> R.string.library_favorites_empty
             activeTab == TAB_PLAYLISTS -> R.string.library_playlists_empty
             else -> R.string.library_no_match
         }
         emptyView.setText(message)
+        addFolderButton.visibility = if (noSongs) View.VISIBLE else View.GONE
     }
 
     private fun renderScan(state: LibraryRepository.ScanState) {
@@ -701,6 +750,27 @@ class LibraryFragment : Fragment(R.layout.fragment_library), LibraryRepository.L
             getString(R.string.library_scanning_folders)
         } else {
             getString(R.string.library_scanning, state.done, state.total)
+        }
+    }
+
+    /** A chip under the header follows a running or finished AI mashup job. */
+    private fun renderMashupChip(state: AiMashupGenerator.State) {
+        if (!isAdded || view == null) return
+        val status = mashupStatusOf(state)
+        mashupChip.visibility = if (status == null) View.GONE else View.VISIBLE
+        if (status != null) mashupChip.text = getString(R.string.mashup_chip, status)
+    }
+
+    private fun mashupStatusOf(state: AiMashupGenerator.State): String? {
+        return when (state.phase) {
+            AiMashupGenerator.Phase.IDLE -> null
+            AiMashupGenerator.Phase.CONNECTING -> getString(R.string.mashup_connecting)
+            AiMashupGenerator.Phase.UPLOADING -> getString(R.string.mashup_uploading, state.done, state.total)
+            AiMashupGenerator.Phase.ANALYSING -> getString(R.string.mashup_analysing, state.done, state.total)
+            AiMashupGenerator.Phase.ROUTING -> getString(R.string.mashup_routing)
+            AiMashupGenerator.Phase.COMPLETED ->
+                resources.getQuantityString(R.plurals.mashup_ready, state.mixes.size, state.mixes.size)
+            AiMashupGenerator.Phase.FAILED -> getString(R.string.mashup_failed)
         }
     }
 
@@ -726,6 +796,7 @@ class LibraryFragment : Fragment(R.layout.fragment_library), LibraryRepository.L
         const val TAB_IDLE_SP = 17f
         const val TAB_ANIMATION_MS = 220L
         const val ROUND_PRESS_SCALE = 0.9f
+        const val CTA_PRESS_SCALE = 0.95f
         const val DISABLED_ALPHA = 0.35f
 
         /** Indexed by the TrackSorter modes. */

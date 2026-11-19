@@ -130,8 +130,7 @@ class SettingsFragment : Fragment(R.layout.fragment_settings), LibraryRepository
 
     private fun wirePlaybackSection(view: View) {
         view.findViewById<View>(R.id.settingsRowSleepTimer).setOnClickListener {
-            SleepTimerDialog.show(requireContext(), host.connection)
-            view.postDelayed({ if (isAdded) renderSleepTimer() }, 250L)
+            SleepTimerDialog.show(requireContext(), host.connection) { if (isAdded) renderSleepTimer() }
         }
 
         // Play speed: 0.50x to 2.00x in 0.05x steps (30 steps, default 1.0x = step 10)
@@ -190,8 +189,10 @@ class SettingsFragment : Fragment(R.layout.fragment_settings), LibraryRepository
         }
     }
 
+    /** 1×, 1.25×, 0.5×: two decimals at most, trailing zeros dropped. */
     private fun renderPlaySpeed(speed: Float) {
-        playSpeedLabel.text = String.format(Locale.US, "%.2fx", speed).replace(".00x", ".0x").replace("0x", "x")
+        val number = String.format(Locale.US, "%.2f", speed).trimEnd('0').trimEnd('.')
+        playSpeedLabel.text = getString(R.string.settings_play_speed_value, number)
     }
 
     private fun applyPlaySpeed(speed: Float) {
