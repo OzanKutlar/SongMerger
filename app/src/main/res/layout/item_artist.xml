@@ -1,24 +1,20 @@
 <?xml version="1.0" encoding="utf-8"?>
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
-    android:layout_height="80dp"
-    android:background="?attr/selectableItemBackground"
-    android:clickable="true"
-    android:focusable="true"
-    android:gravity="center_vertical"
-    android:orientation="horizontal"
-    android:paddingStart="20dp">
+    android:layout_height="wrap_content"
+    android:padding="5dp">
 
-    <!-- Round cover from the artist's first song; the person shows while there is none -->
+    <!-- Square cover from the artist's first song; the person icon shows while there is none -->
     <FrameLayout
         android:id="@+id/artistThumb"
-        android:layout_width="56dp"
-        android:layout_height="56dp"
-        android:background="@drawable/player_thumb_round_bg">
+        android:layout_width="match_parent"
+        android:layout_height="112dp"
+        android:background="@drawable/grid_tile_bg"
+        android:foreground="?attr/selectableItemBackground">
 
         <ImageView
-            android:layout_width="26dp"
-            android:layout_height="26dp"
+            android:layout_width="32dp"
+            android:layout_height="32dp"
             android:layout_gravity="center"
             android:contentDescription="@null"
             android:src="@drawable/player_ic_person"
@@ -30,47 +26,44 @@
             android:layout_height="match_parent"
             android:contentDescription="@null"
             android:scaleType="centerCrop" />
-    </FrameLayout>
-
-    <LinearLayout
-        android:layout_width="0dp"
-        android:layout_height="match_parent"
-        android:layout_marginStart="16dp"
-        android:layout_weight="1"
-        android:orientation="vertical">
 
         <LinearLayout
             android:layout_width="match_parent"
-            android:layout_height="0dp"
-            android:layout_weight="1"
-            android:gravity="center_vertical"
+            android:layout_height="wrap_content"
+            android:layout_gravity="bottom"
+            android:background="@drawable/grid_tile_scrim"
+            android:gravity="bottom"
             android:orientation="vertical"
-            android:paddingEnd="20dp">
+            android:paddingStart="8dp"
+            android:paddingTop="22dp"
+            android:paddingEnd="8dp"
+            android:paddingBottom="7dp">
 
             <TextView
                 android:id="@+id/artistName"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:ellipsize="end"
+                android:maxLines="1"
+                android:shadowColor="#CC000000"
+                android:shadowDx="0"
+                android:shadowDy="1"
+                android:shadowRadius="3"
                 android:singleLine="true"
                 android:textColor="@color/text_primary"
-                android:textSize="17sp" />
+                android:textSize="13sp"
+                android:textStyle="bold" />
 
             <TextView
                 android:id="@+id/artistCount"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="3dp"
+                android:ellipsize="end"
+                android:maxLines="1"
+                android:singleLine="true"
                 android:textColor="@color/text_secondary"
-                android:textSize="14sp" />
+                android:textSize="11sp" />
         </LinearLayout>
+    </FrameLayout>
 
-        <View
-            android:id="@+id/artistDivider"
-            android:layout_width="match_parent"
-            android:layout_height="1dp"
-            android:layout_marginEnd="20dp"
-            android:background="@color/divider" />
-    </LinearLayout>
-
-</LinearLayout>
+</FrameLayout>

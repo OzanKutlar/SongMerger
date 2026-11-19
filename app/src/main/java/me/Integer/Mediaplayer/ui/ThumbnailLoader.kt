@@ -125,7 +125,7 @@ class ThumbnailLoader private constructor(context: Context) {
 
     companion object {
         private const val TAG = "ThumbnailLoader"
-        private const val THUMB_DP = 56f
+        private const val THUMB_DP = 140f
         private const val SHRINK_SLACK = 1.25f
         private const val CACHE_BYTES = 24 * 1024 * 1024
         private const val WORKERS = 2

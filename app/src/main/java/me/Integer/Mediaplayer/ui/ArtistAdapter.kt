@@ -12,7 +12,7 @@ import me.Integer.Mediaplayer.R
 import me.Integer.Mediaplayer.library.Artist
 import me.Integer.Mediaplayer.ui.widgets.SkeletonDrawable
 
-/** Artist rows: a round cover from their first song, the name and the number of songs. */
+/** Compact grid tiles for artists: square cover from their first song, overlaid name and song count. */
 class ArtistAdapter(
     private val thumbnails: ThumbnailLoader,
     private val onClick: (Artist) -> Unit
@@ -23,7 +23,6 @@ class ArtistAdapter(
         val art: ImageView = view.findViewById(R.id.artistArt)
         val name: TextView = view.findViewById(R.id.artistName)
         val count: TextView = view.findViewById(R.id.artistCount)
-        val divider: View = view.findViewById(R.id.artistDivider)
         var isSkeleton = false
     }
 
@@ -61,6 +60,7 @@ class ArtistAdapter(
         val view = LayoutInflater.from(parent.context).inflate(R.layout.item_artist, parent, false)
         val holder = Holder(view)
         holder.thumb.clipToOutline = true
+        applySquareSize(parent, holder.thumb)
         view.setOnClickListener {
             val position = holder.bindingAdapterPosition
             if (position in artists.indices) onClick(artists[position])
@@ -70,7 +70,7 @@ class ArtistAdapter(
 
     override fun onBindViewHolder(holder: Holder, position: Int) {
         if (isLoading && artists.isEmpty()) {
-            bindSkeleton(holder, position)
+            bindSkeleton(holder)
             return
         }
         val artist = artists.getOrNull(position) ?: return
@@ -78,46 +78,44 @@ class ArtistAdapter(
             holder.isSkeleton = false
             holder.name.background = null
             holder.count.background = null
-            setWidth(holder.name, ViewGroup.LayoutParams.MATCH_PARENT)
-            setWidth(holder.count, ViewGroup.LayoutParams.MATCH_PARENT)
         }
         val resources = holder.itemView.resources
         val songs = artist.tracks.size
         holder.name.text = artist.name.ifEmpty { resources.getString(R.string.library_unknown_artist) }
         holder.count.text = resources.getQuantityString(R.plurals.library_song_count, songs, songs)
-        holder.divider.visibility = if (position == artists.size - 1) View.INVISIBLE else View.VISIBLE
         thumbnails.bind(holder.art, artist.tracks.firstOrNull()?.uri.orEmpty())
     }
 
-    private fun bindSkeleton(holder: Holder, position: Int) {
+    private fun bindSkeleton(holder: Holder) {
         val context = holder.itemView.context
-        val density = context.resources.displayMetrics.density
         holder.isSkeleton = true
         thumbnails.clear(holder.art)
-        holder.art.setImageDrawable(SkeletonDrawable.tile(context, ROUND_CORNER_DP))
+        holder.art.setImageDrawable(SkeletonDrawable.tile(context, TILE_CORNER_DP))
         holder.name.text = ""
         holder.count.text = ""
         holder.name.background = SkeletonDrawable.bar(context)
-        holder.count.background = SkeletonDrawable.bar(context)
-        setWidth(holder.name, ((NAME_MIN_DP + (position * 31) % NAME_SPREAD_DP) * density).toInt())
-        setWidth(holder.count, (COUNT_WIDTH_DP * density).toInt())
-        holder.divider.visibility = if (position == SKELETON_COUNT - 1) View.INVISIBLE else View.VISIBLE
+        holder.count.background = null
     }
 
-    private fun setWidth(view: View, width: Int) {
-        val params = view.layoutParams
-        if (params.width != width) {
-            params.width = width
-            view.layoutParams = params
+    private fun applySquareSize(parent: ViewGroup, thumb: View) {
+        val usableWidth = parent.measuredWidth - parent.paddingLeft - parent.paddingRight
+        val density = parent.resources.displayMetrics.density
+        val cellPaddingPx = (CELL_PADDING_DP * 2 * density).toInt()
+        val fallbackPx = (DEFAULT_TILE_DP * density).toInt()
+        val side = if (usableWidth > 0) (usableWidth / GRID_COLUMNS) - cellPaddingPx else fallbackPx
+        if (side > 0) {
+            val params = thumb.layoutParams
+            params.height = side
+            thumb.layoutParams = params
         }
     }
 
     companion object {
-        private const val SKELETON_COUNT = 8
-        private const val ROUND_CORNER_DP = 28f
-        private const val NAME_MIN_DP = 120
-        private const val NAME_SPREAD_DP = 80
-        private const val COUNT_WIDTH_DP = 68
+        private const val SKELETON_COUNT = 9
+        private const val GRID_COLUMNS = 3
+        private const val CELL_PADDING_DP = 5f
+        private const val DEFAULT_TILE_DP = 112f
+        private const val TILE_CORNER_DP = 14f
 
         fun diff(previous: List<Artist>, next: List<Artist>): DiffUtil.DiffResult {
             return DiffUtil.calculateDiff(object : DiffUtil.Callback() {

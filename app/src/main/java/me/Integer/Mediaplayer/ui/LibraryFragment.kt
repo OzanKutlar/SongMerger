@@ -20,6 +20,7 @@ import androidx.appcompat.widget.PopupMenu
 import androidx.core.content.ContextCompat
 import androidx.core.widget.doAfterTextChanged
 import androidx.fragment.app.Fragment
+import androidx.recyclerview.widget.GridLayoutManager
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import me.Integer.Mediaplayer.R
@@ -197,8 +198,23 @@ class LibraryFragment : Fragment(R.layout.fragment_library), LibraryRepository.L
         emptyBlock = view.findViewById(R.id.libraryEmptyBlock)
         addFolderButton = view.findViewById(R.id.libraryAddFolder)
         mashupChip = view.findViewById(R.id.libraryMashupChip)
-        list.layoutManager = LinearLayoutManager(requireContext())
+        updateLayoutManager()
         FastScroller.attach(list) { index -> sectionLabelAt(index) }
+    }
+
+    private fun updateLayoutManager() {
+        val wantGrid = activeTab == TAB_PLAYLISTS || activeTab == TAB_ARTISTS
+        val current = list.layoutManager
+        val isGrid = current is GridLayoutManager
+        if (wantGrid && !isGrid) {
+            list.layoutManager = GridLayoutManager(requireContext(), GRID_SPAN_COUNT)
+        } else if (!wantGrid && (current == null || isGrid)) {
+            list.layoutManager = LinearLayoutManager(requireContext())
+        }
+        val horizontalPad = if (wantGrid) (GRID_HORIZONTAL_PAD_DP * resources.displayMetrics.density).toInt() else 0
+        if (list.paddingLeft != horizontalPad || list.paddingRight != horizontalPad) {
+            list.setPadding(horizontalPad, list.paddingTop, horizontalPad, list.paddingBottom)
+        }
     }
 
     private fun sectionLabelAt(index: Int): String {
@@ -464,6 +480,7 @@ class LibraryFragment : Fragment(R.layout.fragment_library), LibraryRepository.L
     // ------------------------------------------------------------------ rendering
 
     private fun refresh() {
+        updateLayoutManager()
         renderTabs()
         renderScan(repository.scanState)
         if ((!repository.isLoaded || repository.scanState.running) && repository.tracks.isEmpty()) {
@@ -795,6 +812,8 @@ class LibraryFragment : Fragment(R.layout.fragment_library), LibraryRepository.L
         const val TAB_SELECTED_SP = 28f
         const val TAB_IDLE_SP = 17f
         const val TAB_ANIMATION_MS = 220L
+        const val GRID_SPAN_COUNT = 3
+        const val GRID_HORIZONTAL_PAD_DP = 11f
         const val ROUND_PRESS_SCALE = 0.9f
         const val CTA_PRESS_SCALE = 0.95f
         const val DISABLED_ALPHA = 0.35f

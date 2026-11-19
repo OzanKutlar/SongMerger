@@ -12,7 +12,7 @@ import me.Integer.Mediaplayer.R
 import me.Integer.Mediaplayer.library.Playlist
 import me.Integer.Mediaplayer.ui.widgets.SkeletonDrawable
 
-/** Playlist rows: cover, name, number of songs and a three-dot menu. */
+/** Compact grid tiles for playlists: square cover collage, overlaid title, song count, and menu. */
 class PlaylistAdapter(
     private val covers: PlaylistCoverLoader,
     private val onClick: (Playlist) -> Unit,
@@ -25,7 +25,6 @@ class PlaylistAdapter(
         val name: TextView = view.findViewById(R.id.playlistRowName)
         val count: TextView = view.findViewById(R.id.playlistRowCount)
         val menu: View = view.findViewById(R.id.playlistRowMenu)
-        val divider: View = view.findViewById(R.id.playlistRowDivider)
         var isSkeleton = false
     }
 
@@ -60,12 +59,22 @@ class PlaylistAdapter(
     }
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): Holder {
-        val view = LayoutInflater.from(parent.context).inflate(R.layout.item_playlist, parent, false)
+        val view = LayoutInflater.from(parent.context).inflate(R.layout.item_playlist_grid, parent, false)
         val holder = Holder(view)
         holder.thumb.clipToOutline = true
+        applySquareSize(parent, holder.thumb)
         view.setOnClickListener {
             val position = holder.bindingAdapterPosition
             if (position in playlists.indices) onClick(playlists[position])
+        }
+        view.setOnLongClickListener {
+            val position = holder.bindingAdapterPosition
+            if (position in playlists.indices) {
+                onMenu(playlists[position], holder.menu)
+                true
+            } else {
+                false
+            }
         }
         holder.menu.setOnClickListener { anchor ->
             val position = holder.bindingAdapterPosition
@@ -76,7 +85,7 @@ class PlaylistAdapter(
 
     override fun onBindViewHolder(holder: Holder, position: Int) {
         if (isLoading && playlists.isEmpty()) {
-            bindSkeleton(holder, position)
+            bindSkeleton(holder)
             return
         }
         val playlist = playlists.getOrNull(position) ?: return
@@ -84,45 +93,44 @@ class PlaylistAdapter(
             holder.isSkeleton = false
             holder.name.background = null
             holder.count.background = null
-            setWidth(holder.name, ViewGroup.LayoutParams.MATCH_PARENT)
-            setWidth(holder.count, ViewGroup.LayoutParams.MATCH_PARENT)
             holder.menu.visibility = View.VISIBLE
         }
         val songs = playlist.trackUris.size
         holder.name.text = playlist.name
         holder.count.text = holder.itemView.resources.getQuantityString(R.plurals.library_song_count, songs, songs)
-        holder.divider.visibility = if (position == playlists.size - 1) View.INVISIBLE else View.VISIBLE
         covers.bind(holder.art, playlist)
     }
 
-    private fun bindSkeleton(holder: Holder, position: Int) {
+    private fun bindSkeleton(holder: Holder) {
         val context = holder.itemView.context
-        val density = context.resources.displayMetrics.density
         holder.isSkeleton = true
-        holder.art.setImageDrawable(SkeletonDrawable.tile(context))
+        holder.art.setImageDrawable(SkeletonDrawable.tile(context, TILE_CORNER_DP))
         holder.name.text = ""
         holder.count.text = ""
         holder.name.background = SkeletonDrawable.bar(context)
-        holder.count.background = SkeletonDrawable.bar(context)
-        setWidth(holder.name, ((NAME_MIN_DP + (position * 33) % NAME_SPREAD_DP) * density).toInt())
-        setWidth(holder.count, (COUNT_WIDTH_DP * density).toInt())
+        holder.count.background = null
         holder.menu.visibility = View.INVISIBLE
-        holder.divider.visibility = if (position == SKELETON_COUNT - 1) View.INVISIBLE else View.VISIBLE
     }
 
-    private fun setWidth(view: View, width: Int) {
-        val params = view.layoutParams
-        if (params.width != width) {
-            params.width = width
-            view.layoutParams = params
+    private fun applySquareSize(parent: ViewGroup, thumb: View) {
+        val usableWidth = parent.measuredWidth - parent.paddingLeft - parent.paddingRight
+        val density = parent.resources.displayMetrics.density
+        val cellPaddingPx = (CELL_PADDING_DP * 2 * density).toInt()
+        val fallbackPx = (DEFAULT_TILE_DP * density).toInt()
+        val side = if (usableWidth > 0) (usableWidth / GRID_COLUMNS) - cellPaddingPx else fallbackPx
+        if (side > 0) {
+            val params = thumb.layoutParams
+            params.height = side
+            thumb.layoutParams = params
         }
     }
 
     companion object {
-        private const val SKELETON_COUNT = 8
-        private const val NAME_MIN_DP = 130
-        private const val NAME_SPREAD_DP = 85
-        private const val COUNT_WIDTH_DP = 72
+        private const val SKELETON_COUNT = 9
+        private const val GRID_COLUMNS = 3
+        private const val CELL_PADDING_DP = 5f
+        private const val DEFAULT_TILE_DP = 112f
+        private const val TILE_CORNER_DP = 14f
 
         fun diff(previous: List<Playlist>, next: List<Playlist>): DiffUtil.DiffResult {
             return DiffUtil.calculateDiff(object : DiffUtil.Callback() {
