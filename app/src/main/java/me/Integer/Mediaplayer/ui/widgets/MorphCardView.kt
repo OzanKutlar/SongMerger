@@ -125,8 +125,8 @@ internal class MorphScene(
     val icons: List<IconPart>,
     /** Below 1 the card's top edge runs ahead of the others, so a growing card rises. */
     val topLead: Float = 1f,
-    /** True when the card casts a soft shadow while lifted; the shadow is built once, up front. */
-    val liftShadow: Boolean = false
+    /** The soft shadow the card casts while lifted; null for none. Built once and shared. */
+    val shadow: ShadowSprite? = null
 ) {
     val fromCard = RectF(fromCard)
     val toCard = RectF(toCard)
@@ -285,11 +285,7 @@ internal class MorphCardView(context: Context, private val scene: MorphScene) : 
     private val coverShader: BitmapShader? = coverBitmap?.let { BitmapShader(it, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP) }
     // No anti-aliasing: the nine shadow slices then meet without seams.
     private val shadowPaint = Paint(Paint.FILTER_BITMAP_FLAG)
-    private val shadow: ShadowSprite? = if (scene.liftShadow) {
-        ShadowSprite.create(SHADOW_BLUR_DP * density, SHADOW_HALO_DP * density, scene.liftCorner)
-    } else {
-        null
-    }
+    private val shadow: ShadowSprite? = scene.shadow
     private val coverMatrix = Matrix()
     private val card = RectF()
     private val cover = RectF()
@@ -511,8 +507,6 @@ internal class MorphCardView(context: Context, private val scene: MorphScene) : 
     }
 
     private companion object {
-        const val SHADOW_BLUR_DP = 8f
-        const val SHADOW_HALO_DP = 16f
         const val SHADOW_DY_DP = 6f
         const val SHADOW_ALPHA = 96
         const val ICON_OUT_END = 0.35f

@@ -18,6 +18,7 @@ import me.Integer.Mediaplayer.ui.widgets.IconPart
 import me.Integer.Mediaplayer.ui.widgets.ListGlide
 import me.Integer.Mediaplayer.ui.widgets.MorphCardView
 import me.Integer.Mediaplayer.ui.widgets.MorphScene
+import me.Integer.Mediaplayer.ui.widgets.ShadowSprite
 import me.Integer.Mediaplayer.ui.widgets.Motion
 import me.Integer.Mediaplayer.ui.widgets.Spring
 import me.Integer.Mediaplayer.ui.widgets.TextPart
@@ -76,6 +77,9 @@ internal class SongLaunch(
     private var apexY = 0f
     private var tiltSign = 1f
     private var fallMs = FALL_MS
+    private var flightMs = 0f
+    private var shadow: ShadowSprite? = null
+    private var shadowBuilt = false
 
     // The list's item animator while its change animations are paused for the flight.
     private var quietAnimator: SimpleItemAnimator? = null
@@ -83,6 +87,21 @@ internal class SongLaunch(
 
     init {
         ticker.setTimeListener { _, totalTime, deltaTime -> onTick(totalTime, deltaTime) }
+    }
+
+    /** Builds the shared shadow and loads the launch icons ahead of time, so the tap frame does no setup work. */
+    fun warmUp() {
+        shadowSprite()
+        // Loading once fills the resource cache; later loads only copy the cached state.
+        for (res in WARM_ICONS) ContextCompat.getDrawable(context, res)
+    }
+
+    private fun shadowSprite(): ShadowSprite? {
+        if (!shadowBuilt) {
+            shadowBuilt = true
+            shadow = ShadowSprite.create(SHADOW_BLUR_DP * density, SHADOW_HALO_DP * density, LIFT_CORNER_DP * density)
+        }
+        return shadow
     }
 
     /** Plays with the animation from [row] of [list]; a launch still running is replaced. */
@@ -146,7 +165,7 @@ internal class SongLaunch(
         val dt = (deltaMs / 1000f).coerceIn(0f, MAX_FRAME_SECONDS)
         when (phase) {
             Phase.WAITING -> waitForRow()
-            Phase.FLYING -> fly()
+            Phase.FLYING -> fly(deltaMs)
             Phase.LANDED -> settle(dt)
             Phase.IDLE -> ticker.end()
         }
@@ -215,7 +234,7 @@ internal class SongLaunch(
             title = textPart(title, titleRect, spots.title, spots.titleSize, spots.titleFace, spots.titleColor),
             artist = textPart(artist, artistRect, spots.artist, spots.artistSize, spots.artistFace, spots.artistColor),
             icons = icons(item),
-            liftShadow = true
+            shadow = shadowSprite()
         )
         val view = MorphCardView(context, scene)
         layer.addView(
@@ -240,7 +259,8 @@ internal class SongLaunch(
         quietList()
         phase = Phase.FLYING
         phaseStart = clock
-        fly()
+        flightMs = 0f
+        fly(0L)
         return true
     }
 
@@ -285,11 +305,14 @@ internal class SongLaunch(
      * Lift (scale, shadow, rounder corners), then a hop that eases out with a slight tilt,
      * then a fall that hangs and accelerates like gravity while the card morphs into the bar.
      */
-    private fun fly() {
+    private fun fly(deltaMs: Long) {
         val view = card ?: return
-        val t = (clock - phaseStart).toFloat()
-        val lift = easeOut((t / LIFT_MS).coerceIn(0f, 1f))
-        val hop = easeOutCubic(((t - HOP_DELAY_MS) / HOP_MS).coerceIn(0f, 1f))
+        // Flight time advances by at most a frame or two per tick: a slow frame (the card being
+        // built, a busy main thread) pauses the card for a moment instead of making it jump ahead.
+        flightMs += deltaMs.coerceIn(0L, MAX_FLIGHT_STEP_MS).toFloat()
+        val t = flightMs
+        val lift = launchEase((t / LIFT_MS).coerceIn(0f, 1f))
+        val hop = launchEase(((t - HOP_DELAY_MS) / HOP_MS).coerceIn(0f, 1f))
         val fall = ((t - HOP_DELAY_MS - HOP_MS) / fallMs).coerceIn(0f, 1f)
         val morph = smooth(((fall - MORPH_DELAY) / (1f - MORPH_DELAY)).coerceIn(0f, 1f))
         val x = lerp(fromX, toX, easeInOutSine(fall))
@@ -392,11 +415,14 @@ internal class SongLaunch(
 
     private fun lerp(a: Float, b: Float, t: Float): Float = a + (b - a) * t
 
-    private fun easeOut(x: Float): Float = 1f - (1f - x) * (1f - x)
-
-    private fun easeOutCubic(x: Float): Float {
+    /**
+     * Starts from rest (no jolt on the first frame), moves quickly through the middle and eases
+     * into rest at the end: a smooth step that blends into an ease-out as it goes.
+     */
+    private fun launchEase(x: Float): Float {
         val rest = 1f - x
-        return 1f - rest * rest * rest
+        val easeOut = 1f - rest * rest * rest
+        return smooth(x) * rest + easeOut * x
     }
 
     private fun easeInOutSine(x: Float): Float = (-(cos(PI * x) - 1.0) / 2.0).toFloat()
@@ -431,9 +457,14 @@ internal class SongLaunch(
         const val MAX_FRAME_SECONDS = 0.05f
         const val PLAY_TRIGGER_DELAY_MS = 32f
 
-        const val LIFT_MS = 160f
-        const val HOP_DELAY_MS = 70f
-        const val HOP_MS = 230f
+        const val LIFT_MS = 200f
+        const val HOP_DELAY_MS = 50f
+        const val HOP_MS = 260f
+        const val MAX_FLIGHT_STEP_MS = 25L
+
+        // The lifted card's shared shadow.
+        const val SHADOW_BLUR_DP = 8f
+        const val SHADOW_HALO_DP = 16f
         const val FALL_MS = 430f
         const val FALL_REF_DP = 520f
         const val FALL_MIN_MS = 360f
@@ -458,5 +489,12 @@ internal class SongLaunch(
         const val ROW_ICON_DP = 22f
         const val ROW_ICON_COLOR = 0xFFA1A1A6.toInt()
         const val ICON_COUNT = 5
+        val WARM_ICONS = intArrayOf(
+            R.drawable.player_ic_play_next,
+            R.drawable.player_ic_more,
+            R.drawable.player_ic_previous,
+            R.drawable.player_ic_pause,
+            R.drawable.player_ic_next
+        )
     }
 }

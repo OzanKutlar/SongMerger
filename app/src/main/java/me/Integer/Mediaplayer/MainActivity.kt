@@ -98,6 +98,7 @@ class MainActivity : AppCompatActivity(), PlayerHost, Navigator, NowPlayingListe
         window.decorView.post {
             repository.loadIfNeeded()
             expander.warmUp()
+            songLaunch.warmUp()
         }
         if (savedInstanceState == null && wantsPlayer(intent)) pendingOpenPlayer = true
     }
