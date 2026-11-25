@@ -311,8 +311,8 @@ internal class SongLaunch(
         // built, a busy main thread) pauses the card for a moment instead of making it jump ahead.
         flightMs += deltaMs.coerceIn(0L, MAX_FLIGHT_STEP_MS).toFloat()
         val t = flightMs
-        val lift = launchEase((t / LIFT_MS).coerceIn(0f, 1f))
-        val hop = launchEase(((t - HOP_DELAY_MS) / HOP_MS).coerceIn(0f, 1f))
+        val lift = easeOut((t / LIFT_MS).coerceIn(0f, 1f))
+        val hop = hopEase(((t - HOP_DELAY_MS) / HOP_MS).coerceIn(0f, 1f))
         val fall = ((t - HOP_DELAY_MS - HOP_MS) / fallMs).coerceIn(0f, 1f)
         val morph = smooth(((fall - MORPH_DELAY) / (1f - MORPH_DELAY)).coerceIn(0f, 1f))
         val x = lerp(fromX, toX, easeInOutSine(fall))
@@ -415,15 +415,13 @@ internal class SongLaunch(
 
     private fun lerp(a: Float, b: Float, t: Float): Float = a + (b - a) * t
 
+    private fun easeOut(x: Float): Float = 1f - (1f - x) * (1f - x)
+
     /**
-     * Starts from rest (no jolt on the first frame), moves quickly through the middle and eases
-     * into rest at the end: a smooth step that blends into an ease-out as it goes.
+     * Leaves at a brisk but not abrupt speed (half an ease-out-cubic's) and comes to rest at
+     * the apex, so the fall, which also starts from rest, carries on without a corner.
      */
-    private fun launchEase(x: Float): Float {
-        val rest = 1f - x
-        val easeOut = 1f - rest * rest * rest
-        return smooth(x) * rest + easeOut * x
-    }
+    private fun hopEase(x: Float): Float = x * (3f - x * x) / 2f
 
     private fun easeInOutSine(x: Float): Float = (-(cos(PI * x) - 1.0) / 2.0).toFloat()
 
@@ -457,10 +455,10 @@ internal class SongLaunch(
         const val MAX_FRAME_SECONDS = 0.05f
         const val PLAY_TRIGGER_DELAY_MS = 32f
 
-        const val LIFT_MS = 200f
-        const val HOP_DELAY_MS = 50f
-        const val HOP_MS = 260f
-        const val MAX_FLIGHT_STEP_MS = 25L
+        const val LIFT_MS = 140f
+        const val HOP_DELAY_MS = 30f
+        const val HOP_MS = 200f
+        const val MAX_FLIGHT_STEP_MS = 40L
 
         // The lifted card's shared shadow.
         const val SHADOW_BLUR_DP = 8f
