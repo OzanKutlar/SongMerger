@@ -4,6 +4,7 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapShader
 import android.graphics.Canvas
+import android.graphics.Color
 import android.graphics.Matrix
 import android.graphics.Paint
 import android.graphics.RectF
@@ -12,8 +13,11 @@ import android.graphics.Typeface
 import android.graphics.drawable.Drawable
 import android.text.TextPaint
 import android.text.TextUtils
+import android.util.Log
 import android.view.View
 import androidx.core.content.ContextCompat
+import kotlin.math.abs
+import kotlin.math.ceil
 import kotlin.math.max
 import kotlin.math.pow
 import kotlin.math.roundToInt
@@ -126,9 +130,50 @@ internal class MorphScene(
     val toCover = RectF(toCover)
 }
 
+/** One line of text rasterized once into an alpha mask; drawing it tinted is a single textured quad. */
+internal class TextSprite(val mask: Bitmap, val originX: Float, val originY: Float, val baseSize: Float) {
+
+    companion object {
+        private const val TAG = "TextSprite"
+        private const val MIN_PAD_PX = 2f
+        private const val PAD_SHARE = 0.2f
+        private const val MAX_SIDE_PX = 4096
+
+        /** @return null when there is nothing to draw or no mask can be made; the caller then draws live text */
+        fun of(text: String, face: Typeface, size: Float, paint: TextPaint): TextSprite? {
+            if (text.isEmpty() || !size.isFinite() || size <= 0f) return null
+            paint.typeface = face
+            paint.textSize = size
+            paint.color = Color.WHITE
+            val pad = max(MIN_PAD_PX, size * PAD_SHARE)
+            val ascent = paint.ascent()
+            val width = ceil(paint.measureText(text) + pad * 2f).toInt()
+            val height = ceil(paint.descent() - ascent + pad * 2f).toInt()
+            if (width <= 0 || height <= 0 || width > MAX_SIDE_PX || height > MAX_SIDE_PX) return null
+            return try {
+                val mask = Bitmap.createBitmap(width, height, Bitmap.Config.ALPHA_8)
+                val originY = pad - ascent
+                Canvas(mask).drawText(text, pad, originY, paint)
+                mask.prepareToDraw()
+                TextSprite(mask, pad, originY, size)
+            } catch (e: RuntimeException) {
+                Log.w(TAG, "cannot pre-render text: ${e.message}")
+                null
+            } catch (e: OutOfMemoryError) {
+                Log.w(TAG, "no memory to pre-render text")
+                null
+            }
+        }
+    }
+}
+
+/** The masks for one [TextPart]: the start version (null when both ends look the same) and the end version. */
+internal class TextSprites(val from: TextSprite?, val to: TextSprite?)
+
 /**
  * Draws one card part-way between two layouts: background, cover, title, artist and icons
- * all interpolate together. Each frame only sets numbers; nothing is allocated while it runs.
+ * all interpolate together. Each frame only sets numbers; nothing is allocated while it runs,
+ * and text is drawn from masks made once, so glyphs are never re-rasterized mid-flight.
  * The card can also be offset, squashed from its bottom edge and tilted, for physics on top.
  */
 internal class MorphCardView(context: Context, private val scene: MorphScene) : View(context) {
@@ -138,6 +183,7 @@ internal class MorphCardView(context: Context, private val scene: MorphScene) : 
     private val coverPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
     private val placeholderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = scene.coverPlaceholder }
     private val textPaint = TextPaint(Paint.ANTI_ALIAS_FLAG)
+    private val spritePaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
     private val coverBitmap: Bitmap? = scene.cover?.takeUnless { it.isRecycled }
     private val coverShader: BitmapShader? = coverBitmap?.let { BitmapShader(it, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP) }
     private val shadowPaint = Paint(Paint.ANTI_ALIAS_FLAG)
@@ -158,7 +204,13 @@ internal class MorphCardView(context: Context, private val scene: MorphScene) : 
         coverPaint.shader = coverShader
         scene.title?.prepare(textPaint)
         scene.artist?.prepare(textPaint)
+        // Upload the cover to the GPU now rather than on the first animated frame.
+        coverBitmap?.prepareToDraw()
     }
+
+    // Built after the parts are prepared, so each line is rasterized exactly once.
+    private val titleSprites: TextSprites? = scene.title?.let { spritesFor(it) }
+    private val artistSprites: TextSprites? = scene.artist?.let { spritesFor(it) }
 
     /**
      * @param progress 0 = start layout, 1 = end layout
@@ -193,8 +245,8 @@ internal class MorphCardView(context: Context, private val scene: MorphScene) : 
         canvas.scale(squashX, squashY, card.centerX(), card.bottom)
         drawBackground(canvas, m)
         drawCover(canvas, m)
-        scene.title?.let { drawText(canvas, it, m) }
-        scene.artist?.let { drawText(canvas, it, m) }
+        scene.title?.let { drawText(canvas, it, titleSprites, m) }
+        scene.artist?.let { drawText(canvas, it, artistSprites, m) }
         for (icon in scene.icons) drawIcon(canvas, icon, m)
         canvas.restoreToCount(saved)
     }
@@ -258,48 +310,74 @@ internal class MorphCardView(context: Context, private val scene: MorphScene) : 
     }
 
     /**
-     * Draws text at a fixed canonical font size and scales the canvas to the interpolated
-     * size, keeping glyphs cached in the GPU font atlas instead of re-rasterizing every frame.
+     * Each line is a pre-rendered alpha mask, so moving, scaling and tilting it costs one
+     * textured quad per frame. The paint colour tints the mask, so the colour still blends.
      */
-    private fun drawText(canvas: Canvas, part: TextPart, m: Float) {
+    private fun drawText(canvas: Canvas, part: TextPart, sprites: TextSprites?, m: Float) {
         val currentSize = lerp(part.fromSize, part.toSize, m)
         val left = lerp(part.fromLeft, part.toLeft, m) + offsetX
         val baseline = lerp(part.fromBaseline, part.toBaseline, m) + offsetY
         val color = mixColor(part.fromColor, part.toColor, m)
         if (part.sameLook) {
-            val baseSize = max(part.fromSize, part.toSize)
-            drawVersion(canvas, part.toShown, part.toFace, baseSize, currentSize, color, 1f, left, baseline)
+            drawVersion(canvas, sprites?.to, part.toShown, part.toFace, currentSize, color, 1f, left, baseline)
             return
         }
-        drawVersion(canvas, part.fromShown, part.fromFace, part.fromSize, currentSize, color, 1f - m, left, baseline)
-        drawVersion(canvas, part.toShown, part.toFace, part.toSize, currentSize, color, m, left, baseline)
+        drawVersion(canvas, sprites?.from, part.fromShown, part.fromFace, currentSize, color, 1f - m, left, baseline)
+        drawVersion(canvas, sprites?.to, part.toShown, part.toFace, currentSize, color, m, left, baseline)
     }
 
     private fun drawVersion(
         canvas: Canvas,
+        sprite: TextSprite?,
         text: String,
         face: Typeface,
-        baseSize: Float,
         targetSize: Float,
         color: Int,
         share: Float,
         x: Float,
         y: Float
     ) {
-        if (share <= 0f || text.isEmpty() || baseSize <= 0f) return
-        textPaint.typeface = face
-        textPaint.textSize = baseSize
-        textPaint.color = color
-        textPaint.alpha = (((color ushr 24) and 0xFF) * share).roundToInt()
-        val scale = targetSize / baseSize
-        if (kotlin.math.abs(scale - 1f) < 0.001f) {
-            canvas.drawText(text, x, y, textPaint)
-        } else {
-            val saved = canvas.save()
-            canvas.scale(scale, scale, x, y)
-            canvas.drawText(text, x, y, textPaint)
-            canvas.restoreToCount(saved)
+        if (share <= 0f || text.isEmpty() || targetSize <= 0f) return
+        val alpha = (((color ushr 24) and 0xFF) * share).roundToInt().coerceIn(0, OPAQUE)
+        if (alpha == 0) return
+        if (sprite == null) {
+            drawLiveText(canvas, text, face, targetSize, color, alpha, x, y)
+            return
         }
+        spritePaint.color = color
+        spritePaint.alpha = alpha
+        val scale = targetSize / sprite.baseSize
+        val saved = canvas.save()
+        canvas.translate(x, y)
+        if (abs(scale - 1f) >= SCALE_EPSILON) canvas.scale(scale, scale)
+        canvas.drawBitmap(sprite.mask, -sprite.originX, -sprite.originY, spritePaint)
+        canvas.restoreToCount(saved)
+    }
+
+    /** Fallback when no mask could be made: draws the glyphs directly. */
+    private fun drawLiveText(
+        canvas: Canvas,
+        text: String,
+        face: Typeface,
+        size: Float,
+        color: Int,
+        alpha: Int,
+        x: Float,
+        y: Float
+    ) {
+        textPaint.typeface = face
+        textPaint.textSize = size
+        textPaint.color = color
+        textPaint.alpha = alpha
+        canvas.drawText(text, x, y, textPaint)
+    }
+
+    /** Masks at the larger of the two sizes, so scaling only ever shrinks them and they stay sharp. */
+    private fun spritesFor(part: TextPart): TextSprites {
+        val size = max(part.fromSize, part.toSize)
+        val to = TextSprite.of(part.toShown, part.toFace, size, textPaint)
+        val from = if (part.sameLook) null else TextSprite.of(part.fromShown, part.fromFace, size, textPaint)
+        return TextSprites(from, to)
     }
 
     /** Icons ride along with the card, keeping their place relative to its edges. */
@@ -353,5 +431,6 @@ internal class MorphCardView(context: Context, private val scene: MorphScene) : 
         const val ICON_OUT_END = 0.35f
         const val ICON_IN_START = 0.55f
         const val OPAQUE = 255
+        const val SCALE_EPSILON = 0.001f
     }
 }

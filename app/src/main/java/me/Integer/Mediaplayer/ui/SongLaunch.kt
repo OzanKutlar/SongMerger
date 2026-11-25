@@ -335,14 +335,15 @@ internal class SongLaunch(
         phase = Phase.IDLE
         layer.isClickable = false
         miniBar.revealAfterLanding()
-        hiddenRow?.animate()?.alpha(1f)?.setDuration(ROW_RETURN_MS)?.start()
+        hiddenRow?.animate()?.alpha(1f)?.setDuration(ROW_RETURN_MS)?.withLayer()?.start()
         hiddenRow = null
         list = null
         val view = card
         card = null
         if (view != null) {
             fadingCard = view
-            view.animate().alpha(0f).setDuration(HANDOVER_FADE_MS).withEndAction {
+            // The landed card is static, so a hardware layer draws it once and only blends it while fading.
+            view.animate().alpha(0f).setDuration(HANDOVER_FADE_MS).withLayer().withEndAction {
                 layer.removeView(view)
                 if (fadingCard === view) fadingCard = null
             }.start()

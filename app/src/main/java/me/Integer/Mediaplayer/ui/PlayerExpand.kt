@@ -154,6 +154,8 @@ internal class PlayerExpand(
             cancel()
             return
         }
+        // The card no longer changes: draw it into a layer once and only blend it while it fades.
+        view.setLayerType(View.LAYER_TYPE_HARDWARE, null)
         phase = Phase.REVEALING
         phaseStart = clock
     }

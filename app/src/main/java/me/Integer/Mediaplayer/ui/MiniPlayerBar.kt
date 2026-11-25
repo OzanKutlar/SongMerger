@@ -85,8 +85,11 @@ class MiniPlayerBar(
     private var shown = false
     private var iconPlaying: Boolean? = null
 
-    /** A song row is landing where the bar sits: the bar keeps updating but stays invisible. */
+    /** A song row is landing where the bar sits: the bar stays invisible and defers its work until the hand-over. */
     private var held = false
+
+    /** True while the bar catches up after a hold: changes snap instead of animating. */
+    private var snapping = false
 
     /** The bar's corner radius. */
     val cornerPx: Float
@@ -129,6 +132,9 @@ class MiniPlayerBar(
     fun render() {
         val state = host.nowPlaying
         setShown(state.active && !suppressed)
+        // A landing row covers the bar: text, art, tint and the disc wait for the hand-over,
+        // so none of that work (or the layout pass it causes) lands in the middle of the fall.
+        if (held) return
         if (!state.active) {
             vinyl.setPlaying(false)
             stopProgress()
@@ -199,6 +205,8 @@ class MiniPlayerBar(
     /** A song row is about to land here: the bar disappears at once and waits. */
     fun holdForLanding() {
         held = true
+        vinyl.setPlaying(false)
+        bar.removeCallbacks(progressTask)
         bar.animate().cancel()
         bar.alpha = 0f
         bar.translationX = 0f
@@ -211,13 +219,14 @@ class MiniPlayerBar(
     fun releaseHold() {
         if (!held) return
         held = false
+        catchUp()
         if (shown) bar.animate().alpha(1f).setDuration(SHOW_MS).setInterpolator(DecelerateInterpolator()).start()
     }
 
     /** The landed row hands over: the bar, already showing the new song, appears at once. */
     fun revealAfterLanding() {
         held = false
-        render()
+        catchUp()
         if (!shown) return
         bar.animate().cancel()
         bar.alpha = 1f
@@ -232,6 +241,16 @@ class MiniPlayerBar(
     /** The growing card was called off before the player opened. */
     fun restoreAfterExpand() {
         if (shown && !held) bar.alpha = 1f
+    }
+
+    /** Renders everything deferred during a hold in one pass, snapping instead of animating. */
+    private fun catchUp() {
+        snapping = true
+        try {
+            render()
+        } finally {
+            snapping = false
+        }
     }
 
     // ------------------------------------------------------------------ progress
@@ -290,7 +309,7 @@ class MiniPlayerBar(
     /** The icon shrinks away, swaps and grows back, like the big play button. */
     private fun renderPlayIcon(playing: Boolean) {
         if (iconPlaying == playing) return
-        val animate = iconPlaying != null && shown && !held
+        val animate = iconPlaying != null && shown && !held && !snapping
         iconPlaying = playing
         playCell.contentDescription = if (playing) pauseDescription else playDescription
         if (!animate) {
@@ -326,7 +345,7 @@ class MiniPlayerBar(
 
     private fun applyTint(art: Bitmap?) {
         if (tintApplied && art === tintedArt) return
-        val animate = tintApplied && !held
+        val animate = tintApplied && !held && !snapping
         tintApplied = true
         tintedArt = art
         val target = CoverTint.of(art)
