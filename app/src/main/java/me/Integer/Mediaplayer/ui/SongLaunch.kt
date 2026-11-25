@@ -12,6 +12,7 @@ import android.widget.ImageView
 import android.widget.TextView
 import androidx.core.content.ContextCompat
 import androidx.recyclerview.widget.RecyclerView
+import androidx.recyclerview.widget.SimpleItemAnimator
 import me.Integer.Mediaplayer.R
 import me.Integer.Mediaplayer.ui.widgets.IconPart
 import me.Integer.Mediaplayer.ui.widgets.ListGlide
@@ -23,6 +24,8 @@ import me.Integer.Mediaplayer.ui.widgets.TextPart
 import me.Integer.Mediaplayer.ui.widgets.ViewGeometry
 import kotlin.math.PI
 import kotlin.math.cos
+import kotlin.math.hypot
+import kotlin.math.sqrt
 
 /**
  * The song launch: the tapped row becomes the mini player.
@@ -72,6 +75,11 @@ internal class SongLaunch(
     private var toY = 0f
     private var apexY = 0f
     private var tiltSign = 1f
+    private var fallMs = FALL_MS
+
+    // The list's item animator while its change animations are paused for the flight.
+    private var quietAnimator: SimpleItemAnimator? = null
+    private var animatorHadChanges = false
 
     init {
         ticker.setTimeListener { _, totalTime, deltaTime -> onTick(totalTime, deltaTime) }
@@ -119,6 +127,7 @@ internal class SongLaunch(
         hiddenRow = null
         layer.isClickable = false
         miniBar.releaseHold()
+        restoreList()
         list = null
         if (runPending) runPending() else pendingPlay = null
     }
@@ -205,7 +214,8 @@ internal class SongLaunch(
             coverPlaceholder = ContextCompat.getColor(context, R.color.round_button),
             title = textPart(title, titleRect, spots.title, spots.titleSize, spots.titleFace, spots.titleColor),
             artist = textPart(artist, artistRect, spots.artist, spots.artistSize, spots.artistFace, spots.artistColor),
-            icons = icons(item)
+            icons = icons(item),
+            liftShadow = true
         )
         val view = MorphCardView(context, scene)
         layer.addView(
@@ -223,6 +233,11 @@ internal class SongLaunch(
         toY = spots.card.centerY()
         apexY = fromY - HOP_DP * density
         tiltSign = if (toX < fromX) -1f else 1f
+        // Longer drops get more time, so the speed on screen stays even.
+        val dropDp = hypot(toX - fromX, toY - apexY) / density
+        val scaled = FALL_MS * sqrt(dropDp / FALL_REF_DP)
+        fallMs = if (scaled.isFinite()) scaled.coerceIn(FALL_MIN_MS, FALL_MAX_MS) else FALL_MS
+        quietList()
         phase = Phase.FLYING
         phaseStart = clock
         fly()
@@ -275,10 +290,10 @@ internal class SongLaunch(
         val t = (clock - phaseStart).toFloat()
         val lift = easeOut((t / LIFT_MS).coerceIn(0f, 1f))
         val hop = easeOutCubic(((t - HOP_DELAY_MS) / HOP_MS).coerceIn(0f, 1f))
-        val fall = ((t - HOP_DELAY_MS - HOP_MS) / FALL_MS).coerceIn(0f, 1f)
+        val fall = ((t - HOP_DELAY_MS - HOP_MS) / fallMs).coerceIn(0f, 1f)
         val morph = smooth(((fall - MORPH_DELAY) / (1f - MORPH_DELAY)).coerceIn(0f, 1f))
         val x = lerp(fromX, toX, easeInOutSine(fall))
-        val y = if (fall <= 0f) lerp(fromY, apexY, hop) else lerp(apexY, toY, fall * fall)
+        val y = if (fall <= 0f) lerp(fromY, apexY, hop) else lerp(apexY, toY, gravity(fall))
         val scale = 1f + (LIFT_SCALE - 1f) * lift * (1f - fall)
         val tilt = TILT_DEGREES * tiltSign * hop * (1f - fall)
         view.update(
@@ -332,6 +347,7 @@ internal class SongLaunch(
     /** The real bar appears under the card, the card fades off it, and the row returns. */
     private fun handOver() {
         ticker.end()
+        restoreList()
         phase = Phase.IDLE
         layer.isClickable = false
         miniBar.revealAfterLanding()
@@ -387,6 +403,23 @@ internal class SongLaunch(
 
     private fun smooth(x: Float): Float = x * x * (3f - 2f * x)
 
+    /** Hangs at the top and accelerates like gravity, but lands at about 70% of free-fall speed. */
+    private fun gravity(x: Float): Float = x * x * (1f + GRAVITY_BLEND - GRAVITY_BLEND * x)
+
+    /** While the row is in the air the list rebinds in place, so no second row is built and faded in under the card. */
+    private fun quietList() {
+        val animator = list?.itemAnimator as? SimpleItemAnimator ?: return
+        if (quietAnimator != null) return
+        animatorHadChanges = animator.supportsChangeAnimations
+        animator.supportsChangeAnimations = false
+        quietAnimator = animator
+    }
+
+    private fun restoreList() {
+        quietAnimator?.supportsChangeAnimations = animatorHadChanges
+        quietAnimator = null
+    }
+
     private companion object {
         const val ROW_WAIT_MS = 300L
         const val COVER_WAIT_MS = 120L
@@ -402,6 +435,10 @@ internal class SongLaunch(
         const val HOP_DELAY_MS = 70f
         const val HOP_MS = 230f
         const val FALL_MS = 430f
+        const val FALL_REF_DP = 520f
+        const val FALL_MIN_MS = 360f
+        const val FALL_MAX_MS = 560f
+        const val GRAVITY_BLEND = 0.6f
         const val MORPH_DELAY = 0.06f
         const val HOP_DP = 40f
         const val LIFT_SCALE = 1.04f

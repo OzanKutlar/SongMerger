@@ -3,10 +3,12 @@ package me.Integer.Mediaplayer.ui.widgets
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapShader
+import android.graphics.BlurMaskFilter
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Matrix
 import android.graphics.Paint
+import android.graphics.Rect
 import android.graphics.RectF
 import android.graphics.Shader
 import android.graphics.Typeface
@@ -122,7 +124,9 @@ internal class MorphScene(
     val artist: TextPart?,
     val icons: List<IconPart>,
     /** Below 1 the card's top edge runs ahead of the others, so a growing card rises. */
-    val topLead: Float = 1f
+    val topLead: Float = 1f,
+    /** True when the card casts a soft shadow while lifted; the shadow is built once, up front. */
+    val liftShadow: Boolean = false
 ) {
     val fromCard = RectF(fromCard)
     val toCard = RectF(toCard)
@@ -167,6 +171,99 @@ internal class TextSprite(val mask: Bitmap, val originX: Float, val originY: Flo
     }
 }
 
+/**
+ * A soft rounded shadow blurred once into a small mask, then stretched around a card of any
+ * size in nine slices. Drawing it is nine textured quads, with no blur work per frame.
+ */
+internal class ShadowSprite private constructor(
+    private val mask: Bitmap,
+    private val edgePx: Int,
+    private val halo: Float
+) {
+
+    private val src = Rect()
+    private val dst = RectF()
+
+    /** Draws around [card], reaching the halo past its edges and shifted down by [dy]; [paint] sets the alpha. */
+    fun draw(canvas: Canvas, card: RectF, dy: Float, paint: Paint) {
+        val left = card.left - halo
+        val top = card.top - halo + dy
+        val right = card.right + halo
+        val bottom = card.bottom + halo + dy
+        val corner = minOf(edgePx.toFloat(), (right - left) / 2f, (bottom - top) / 2f)
+        if (!corner.isFinite() || corner <= 0f) return
+        for (row in 0 until SLICES) {
+            for (col in 0 until SLICES) {
+                src.set(srcStart(col), srcStart(row), srcEnd(col), srcEnd(row))
+                dst.set(
+                    dstStart(col, left, right, corner),
+                    dstStart(row, top, bottom, corner),
+                    dstEnd(col, left, right, corner),
+                    dstEnd(row, top, bottom, corner)
+                )
+                if (dst.width() > 0f && dst.height() > 0f) canvas.drawBitmap(mask, src, dst, paint)
+            }
+        }
+    }
+
+    private fun srcStart(i: Int): Int = when (i) {
+        0 -> 0
+        1 -> edgePx
+        else -> edgePx + 1
+    }
+
+    private fun srcEnd(i: Int): Int = when (i) {
+        0 -> edgePx
+        1 -> edgePx + 1
+        else -> edgePx * 2 + 1
+    }
+
+    private fun dstStart(i: Int, a: Float, b: Float, corner: Float): Float = when (i) {
+        0 -> a
+        1 -> a + corner
+        else -> b - corner
+    }
+
+    private fun dstEnd(i: Int, a: Float, b: Float, corner: Float): Float = when (i) {
+        0 -> a + corner
+        1 -> b - corner
+        else -> b
+    }
+
+    companion object {
+        private const val TAG = "ShadowSprite"
+        private const val SLICES = 3
+        private const val MAX_EDGE_PX = 1024
+
+        /** @return null when the sizes are unusable or no mask can be made; the card then has no shadow */
+        fun create(blurPx: Float, haloPx: Float, cornerPx: Float): ShadowSprite? {
+            val valid = blurPx.isFinite() && blurPx > 0f && haloPx.isFinite() && haloPx > 0f &&
+                cornerPx.isFinite() && cornerPx >= 0f
+            if (!valid) return null
+            val edge = ceil(haloPx + cornerPx + blurPx).toInt()
+            if (edge <= 0 || edge > MAX_EDGE_PX) return null
+            val size = edge * 2 + 1
+            return try {
+                val mask = Bitmap.createBitmap(size, size, Bitmap.Config.ALPHA_8)
+                val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                    color = Color.BLACK
+                    maskFilter = BlurMaskFilter(blurPx, BlurMaskFilter.Blur.NORMAL)
+                }
+                val body = RectF(haloPx, haloPx, size - haloPx, size - haloPx)
+                Canvas(mask).drawRoundRect(body, cornerPx, cornerPx, paint)
+                mask.prepareToDraw()
+                ShadowSprite(mask, edge, haloPx)
+            } catch (e: RuntimeException) {
+                Log.w(TAG, "cannot build the shadow: ${e.message}")
+                null
+            } catch (e: OutOfMemoryError) {
+                Log.w(TAG, "no memory for the shadow")
+                null
+            }
+        }
+    }
+}
+
 /** The masks for one [TextPart]: the start version (null when both ends look the same) and the end version. */
 internal class TextSprites(val from: TextSprite?, val to: TextSprite?)
 
@@ -186,10 +283,15 @@ internal class MorphCardView(context: Context, private val scene: MorphScene) : 
     private val spritePaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
     private val coverBitmap: Bitmap? = scene.cover?.takeUnless { it.isRecycled }
     private val coverShader: BitmapShader? = coverBitmap?.let { BitmapShader(it, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP) }
-    private val shadowPaint = Paint(Paint.ANTI_ALIAS_FLAG)
+    // No anti-aliasing: the nine shadow slices then meet without seams.
+    private val shadowPaint = Paint(Paint.FILTER_BITMAP_FLAG)
+    private val shadow: ShadowSprite? = if (scene.liftShadow) {
+        ShadowSprite.create(SHADOW_BLUR_DP * density, SHADOW_HALO_DP * density, scene.liftCorner)
+    } else {
+        null
+    }
     private val coverMatrix = Matrix()
     private val card = RectF()
-    private val shadowRect = RectF()
     private val cover = RectF()
 
     private var progress = 0f
@@ -257,7 +359,7 @@ internal class MorphCardView(context: Context, private val scene: MorphScene) : 
         val corner = lerp(lerp(scene.fromCorner, scene.liftCorner, lift), scene.toCorner, m)
         val shadowStrength = lift * visible
         if (shadowStrength > 0.01f) {
-            drawSoftShadow(canvas, corner, shadowStrength)
+            drawSoftShadow(canvas, shadowStrength)
         }
         val color = mixColor(scene.fromColor, scene.toColor, m)
         backgroundPaint.color = color
@@ -265,29 +367,14 @@ internal class MorphCardView(context: Context, private val scene: MorphScene) : 
         canvas.drawRoundRect(card, corner, corner, backgroundPaint)
     }
 
-    /**
-     * Draws a multi-layered soft ambient/drop shadow using hardware-accelerated round rects
-     * instead of [Paint.setShadowLayer], avoiding per-frame Gaussian blur mask regeneration.
-     */
-    private fun drawSoftShadow(canvas: Canvas, corner: Float, strength: Float) {
-        val maxSpread = SHADOW_DP * density * lift
-        val dy = SHADOW_DY_DP * density * lift
-        shadowPaint.color = 0x000000
-        for (i in 0 until SHADOW_LAYERS) {
-            val fraction = (i + 1f) / SHADOW_LAYERS
-            val spread = maxSpread * fraction
-            val layerAlpha = (SHADOW_BASE_ALPHA * strength * (1f - fraction * 0.72f)).roundToInt().coerceIn(0, OPAQUE)
-            if (layerAlpha <= 0) continue
-            shadowPaint.alpha = layerAlpha
-            shadowRect.set(
-                card.left - spread,
-                card.top - spread * 0.6f + dy * fraction,
-                card.right + spread,
-                card.bottom + spread + dy * fraction
-            )
-            val r = corner + spread
-            canvas.drawRoundRect(shadowRect, r, r, shadowPaint)
-        }
+    /** One pre-blurred mask stretched around the card: a smooth falloff with no bands and no per-frame blur. */
+    private fun drawSoftShadow(canvas: Canvas, strength: Float) {
+        val sprite = shadow ?: return
+        val alpha = (SHADOW_ALPHA * strength).roundToInt().coerceIn(0, OPAQUE)
+        if (alpha == 0) return
+        shadowPaint.color = Color.BLACK
+        shadowPaint.alpha = alpha
+        sprite.draw(canvas, card, SHADOW_DY_DP * density * lift, shadowPaint)
     }
 
     private fun drawCover(canvas: Canvas, m: Float) {
@@ -424,10 +511,10 @@ internal class MorphCardView(context: Context, private val scene: MorphScene) : 
     }
 
     private companion object {
-        const val SHADOW_DP = 16f
+        const val SHADOW_BLUR_DP = 8f
+        const val SHADOW_HALO_DP = 16f
         const val SHADOW_DY_DP = 6f
-        const val SHADOW_LAYERS = 4
-        const val SHADOW_BASE_ALPHA = 38
+        const val SHADOW_ALPHA = 96
         const val ICON_OUT_END = 0.35f
         const val ICON_IN_START = 0.55f
         const val OPAQUE = 255
